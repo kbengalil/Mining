@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+supabase
+python-dotenv
+requests
+beautifulsoup4
+pdfplumber

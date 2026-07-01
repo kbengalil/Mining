@@ -2,7 +2,15 @@ import streamlit as st
 import requests
 import pdfplumber
 import io
+import os
+from pathlib import Path
 from playwright.sync_api import sync_playwright
+
+SAVE_LOCATIONS = {
+    "Desktop": Path.home() / "OneDrive" / "Desktop",
+    "Documents": Path.home() / "Documents",
+    "This project folder": Path(__file__).parent / "data",
+}
 
 COMPANIES = {
     "First Mining Gold": {
@@ -27,7 +35,7 @@ def find_pdf_links(company_name):
         for page_path in company["investor_pages"]:
             url = base_url + page_path
             try:
-                page.goto(url, wait_until="networkidle", timeout=15000)
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 anchors = page.eval_on_selector_all(
                     "a[href]",
                     "els => els.map(el => ({href: el.href, text: el.innerText.trim()}))"
@@ -45,6 +53,14 @@ def find_pdf_links(company_name):
     return pdf_links
 
 
+def get_company_pdf_folder(location_name, company_name):
+    base = SAVE_LOCATIONS[location_name]
+    company_folder = base / company_name.replace(" ", "_")
+    pdf_folder = company_folder / "Company's PDFs"
+    pdf_folder.mkdir(parents=True, exist_ok=True)
+    return pdf_folder
+
+
 def fetch_pdf_bytes(pdf_url):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -55,10 +71,30 @@ def fetch_pdf_bytes(pdf_url):
     return pdf_bytes
 
 
+INVALID_FILENAME_CHARS = '\\/:*?"<>|\n\r\t'
+
+def sanitize_filename(label):
+    cleaned = "".join("_" if c in INVALID_FILENAME_CHARS else c for c in label)
+    cleaned = "_".join(cleaned.split())
+    return cleaned.strip("_")
+
+
+def save_pdf(label, url, folder):
+    pdf_bytes = fetch_pdf_bytes(url)
+    file_name = sanitize_filename(label) + ".pdf"
+    file_path = folder / file_name
+    file_path.write_bytes(pdf_bytes)
+    return file_path
+
+
 st.set_page_config(page_title="Mining AI Analyst", layout="wide")
 st.title("Mining AI Analyst")
 
 company_name = st.selectbox("Select company", list(COMPANIES.keys()))
+location_name = st.selectbox("Save location", list(SAVE_LOCATIONS.keys()))
+
+pdf_folder = get_company_pdf_folder(location_name, company_name)
+st.caption(f"Files will be saved to: {pdf_folder}")
 
 if st.button("Load available documents"):
     with st.spinner("Scanning investor pages for PDFs..."):
@@ -66,27 +102,27 @@ if st.button("Load available documents"):
         st.session_state.pdf_links = pdf_links
 
 if "pdf_links" in st.session_state and st.session_state.pdf_links:
-    selected_label = st.selectbox("Select document", list(st.session_state.pdf_links.keys()))
-    selected_url = st.session_state.pdf_links[selected_label]
-    st.caption(f"URL: {selected_url}")
+    pdf_links = st.session_state.pdf_links
+    mode = st.radio("Documents to download", ["Download all", "Select specific documents"])
 
-    if st.button("Fetch PDF"):
-        with st.spinner("Downloading PDF..."):
-            try:
-                pdf_bytes = fetch_pdf_bytes(selected_url)
-                st.session_state.pdf_bytes = pdf_bytes
-                st.session_state.pdf_name = selected_label.replace(" ", "_") + ".pdf"
-                st.success("PDF ready to download.")
-            except Exception as e:
-                st.error(f"Failed to fetch PDF: {e}")
+    labels_to_fetch = list(pdf_links.keys())
+    if mode == "Select specific documents":
+        labels_to_fetch = [
+            label for label in pdf_links
+            if st.checkbox(label, value=False)
+        ]
 
-    if "pdf_bytes" in st.session_state:
-        st.download_button(
-            label="Save PDF to your computer",
-            data=st.session_state.pdf_bytes,
-            file_name=st.session_state.pdf_name,
-            mime="application/pdf",
-        )
+    if st.button("Fetch PDF(s)"):
+        if not labels_to_fetch:
+            st.warning("No documents selected.")
+        else:
+            with st.spinner(f"Downloading {len(labels_to_fetch)} PDF(s)..."):
+                for label in labels_to_fetch:
+                    try:
+                        file_path = save_pdf(label, pdf_links[label], pdf_folder)
+                        st.success(f"Saved: {file_path}")
+                    except Exception as e:
+                        st.error(f"Failed to fetch '{label}': {e}")
 
 elif "pdf_links" in st.session_state and not st.session_state.pdf_links:
     st.warning("No PDFs found on the investor pages.")

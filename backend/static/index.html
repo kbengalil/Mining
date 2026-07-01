@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mining AI Analyst</title>
+<style>
+  body { font-family: sans-serif; max-width: 700px; margin: 40px auto; }
+  #errors { color: #b00020; }
+  #documents label { display: block; margin: 4px 0; }
+  #selectAllRow { margin: 8px 0; font-weight: bold; }
+</style>
+</head>
+<body>
+  <h1>Mining AI Analyst</h1>
+
+  <label for="company">Company:</label>
+  <select id="company"></select>
+  <button id="loadBtn">Find Documents</button>
+
+  <h2>Documents</h2>
+  <div id="selectAllRow">
+    <label><input type="checkbox" id="selectAll"> Select all</label>
+  </div>
+  <div id="documents"></div>
+  <button id="downloadBtn">Download Selected (.zip)</button>
+  <div id="downloadStatus" style="display:none; margin-top: 10px;">
+    <p id="downloadStatusText">Please wait, preparing your download...</p>
+    <progress id="downloadProgress" style="width: 100%;" value="0" max="1"></progress>
+  </div>
+
+  <h2>Errors</h2>
+  <div id="errors"></div>
+
+  <h2>Chat with the Analyst</h2>
+  <p style="color:#666; font-size: 0.9em;">Select documents above, then ask a question. The first message sends your selected documents as context.</p>
+  <div id="chatMessages" style="border: 1px solid #ccc; padding: 10px; min-height: 100px; max-height: 400px; overflow-y: auto;"></div>
+  <div id="chatStatus" style="display:none; color:#666;">Thinking...</div>
+  <input type="text" id="chatInput" placeholder="Ask about the selected documents..." style="width: 80%;">
+  <button id="chatSendBtn">Send</button>
+
+<script>
+async function loadCompanies() {
+  const res = await fetch("/companies");
+  const companies = await res.json();
+  const select = document.getElementById("company");
+  select.innerHTML = companies.map(c => `<option value="${c}">${c}</option>`).join("");
+}
+
+async function loadDocuments() {
+  const company = document.getElementById("company").value;
+  const docsDiv = document.getElementById("documents");
+  const errorsDiv = document.getElementById("errors");
+  document.getElementById("selectAll").checked = false;
+  docsDiv.textContent = "Loading...";
+  errorsDiv.textContent = "";
+
+  const res = await fetch(`/companies/${encodeURIComponent(company)}/documents`);
+  const data = await res.json();
+
+  const entries = Object.entries(data.documents);
+  docsDiv.innerHTML = entries.map(([label, url]) => `
+    <label>
+      <input type="checkbox" class="docCheckbox" data-label="${label}" data-url="${url}">
+      ${label}
+    </label>
+  `).join("") || "No documents found.";
+
+  errorsDiv.innerHTML = data.errors.map(
+    e => `<div>${e.page}: ${e.reason}</div>`
+  ).join("");
+}
+
+document.getElementById("selectAll").addEventListener("change", (e) => {
+  document.querySelectorAll(".docCheckbox").forEach(cb => { cb.checked = e.target.checked; });
+});
+
+async function downloadSelected() {
+  const checked = document.querySelectorAll(".docCheckbox:checked");
+  if (checked.length === 0) {
+    alert("Select at least one document first.");
+    return;
+  }
+  const documents = {};
+  checked.forEach(cb => { documents[cb.dataset.label] = cb.dataset.url; });
+
+  const downloadBtn = document.getElementById("downloadBtn");
+  const statusDiv = document.getElementById("downloadStatus");
+  const statusText = document.getElementById("downloadStatusText");
+  const progressBar = document.getElementById("downloadProgress");
+  downloadBtn.disabled = true;
+  statusDiv.style.display = "block";
+
+  const company = document.getElementById("company").value;
+  try {
+    const startRes = await fetch(`/companies/${encodeURIComponent(company)}/documents/download/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ documents })
+    });
+    if (!startRes.ok) {
+      alert("Download failed to start.");
+      return;
+    }
+    const { job_id } = await startRes.json();
+
+    let status;
+    do {
+      await new Promise(r => setTimeout(r, 400));
+      const statusRes = await fetch(`/jobs/${job_id}/status`);
+      status = await statusRes.json();
+      statusText.textContent = `Downloading ${status.completed}/${status.total}...`;
+      progressBar.max = status.total;
+      progressBar.value = status.completed;
+    } while (status.status !== "done");
+
+    const fileRes = await fetch(`/jobs/${job_id}/download`);
+    const blob = await fileRes.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${company.replace(/ /g, "_")}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } finally {
+    downloadBtn.disabled = false;
+    statusDiv.style.display = "none";
+  }
+}
+
+let sessionId = null;
+
+function appendChatMessage(sender, text) {
+  const messagesDiv = document.getElementById("chatMessages");
+  const p = document.createElement("p");
+  p.innerHTML = `<strong>${sender}:</strong> ${text}`;
+  messagesDiv.appendChild(p);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById("chatInput");
+  const message = input.value.trim();
+  if (!message) return;
+
+  const sendBtn = document.getElementById("chatSendBtn");
+  const statusDiv = document.getElementById("chatStatus");
+
+  appendChatMessage("You", message);
+  input.value = "";
+  sendBtn.disabled = true;
+  statusDiv.style.display = "block";
+
+  const documents = {};
+  if (sessionId === null) {
+    document.querySelectorAll(".docCheckbox:checked").forEach(cb => {
+      documents[cb.dataset.label] = cb.dataset.url;
+    });
+  }
+
+  try {
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, documents, session_id: sessionId })
+    });
+    if (!res.ok) {
+      appendChatMessage("Error", "Something went wrong. Please try again.");
+      return;
+    }
+    const data = await res.json();
+    sessionId = data.session_id;
+    appendChatMessage("Analyst", data.reply);
+  } finally {
+    sendBtn.disabled = false;
+    statusDiv.style.display = "none";
+  }
+}
+
+document.getElementById("chatSendBtn").addEventListener("click", sendChatMessage);
+document.getElementById("chatInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendChatMessage();
+});
+
+document.getElementById("loadBtn").addEventListener("click", loadDocuments);
+document.getElementById("downloadBtn").addEventListener("click", downloadSelected);
+appendChatMessage("Analyst", "Hello! I'm the Mining AI Analyst, ready to help you analyze junior mining stocks.");
+loadCompanies();
+</script>
+</body>
+</html>
