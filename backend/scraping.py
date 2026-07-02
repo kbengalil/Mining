@@ -11,6 +11,9 @@ COMPANIES = {
             "/investors/reports-filings/financials/",
             "/investors/reports-filings/annual-information-form/",
         ],
+        "about_pages": [
+            "/about/management/",
+        ],
     }
 }
 
@@ -62,6 +65,23 @@ def sanitize_filename(label: str) -> str:
     cleaned = "".join("_" if c in INVALID_FILENAME_CHARS else c for c in label)
     cleaned = "_".join(cleaned.split())
     return cleaned.strip("_") or "document"
+
+
+def scrape_about_pages(company_name: str) -> str:
+    company = COMPANIES[company_name]
+    base_url = company["base_url"]
+    texts = []
+    for path in company.get("about_pages", []):
+        url = base_url + path
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+            text = soup.get_text(" ", strip=True)
+            texts.append(f"--- {url} ---\n{text}")
+        except Exception as e:
+            print(f"  Could not scrape {url}: {e}")
+    return "\n\n".join(texts)
 
 
 def fetch_pdf_bytes(url: str) -> bytes:

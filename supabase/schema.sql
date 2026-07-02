@@ -35,15 +35,16 @@ create table agent_history (
     created_at timestamptz not null default now()
 );
 
--- Shared RAG knowledge base (glossary, NI 43-101 standards, peer comps, red flags).
+-- Shared RAG knowledge base (glossary, NI 43-101 standards, peer comps, red flags, expert interviews).
 -- Not user-specific — same content backs every user's agent.
--- embedding dimension must match whatever embedding model you call (e.g. Voyage AI) — adjust before first insert.
+-- 768 dimensions = Google text-embedding-004 output size.
 create table knowledge_base (
     id uuid primary key default gen_random_uuid(),
-    category text not null, -- 'glossary' | 'standard' | 'peer_comp' | 'red_flag'
+    category text not null, -- 'glossary' | 'standard' | 'peer_comp' | 'red_flag' | 'expert_interview'
     title text not null,
     content text not null,
-    embedding vector(1024),
+    source_url text,
+    embedding vector(768),
     created_at timestamptz not null default now()
 );
 
