@@ -15,8 +15,8 @@ from supabase import create_client
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from agent import generate_overview, send_message, _filter_docs  # noqa: E402 — must import after load_dotenv populates env vars
-from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename
+from agent import generate_overview, send_message, _filter_docs, detect_company_intent  # noqa: E402
+from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename, discover_company
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SECRET_KEY"])
 
@@ -38,14 +38,14 @@ def health():
 
 @app.get("/companies")
 def list_companies():
-    return list(COMPANIES.keys())
+    return list({**COMPANIES, **dynamic_companies}.keys())
 
 
 @app.get("/companies/{company_name}/documents")
 def get_documents(company_name: str):
-    if company_name not in COMPANIES:
+    if company_name not in COMPANIES and company_name not in dynamic_companies:
         raise HTTPException(status_code=404, detail="Unknown company")
-    return find_pdf_links(company_name)
+    return find_pdf_links(company_name, dynamic_companies)
 
 
 class DownloadRequest(BaseModel):
@@ -108,6 +108,7 @@ def job_download(job_id: str):
 
 
 overview_jobs: dict[str, dict] = {}
+dynamic_companies: dict[str, dict] = {}  # populated at runtime via chat intent
 
 
 def _save_overview(company_name: str, overview_md: str, current_urls: list[str]):
@@ -145,10 +146,10 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
 
 @app.post("/companies/{company_name}/overview/start")
 def start_overview(company_name: str, background_tasks: BackgroundTasks, force: bool = False):
-    if company_name not in COMPANIES:
+    if company_name not in COMPANIES and company_name not in dynamic_companies:
         raise HTTPException(status_code=404, detail="Unknown company")
 
-    result = find_pdf_links(company_name)
+    result = find_pdf_links(company_name, dynamic_companies)
     pdf_docs = result["documents"]
     current_urls = sorted(pdf_docs.values())
     pdf_list = list(pdf_docs.keys())
@@ -192,7 +193,40 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/chat")
-def chat(payload: ChatRequest):
+def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
+    # Check if user wants to analyze a specific company
+    company_name = detect_company_intent(payload.message)
+    if company_name:
+        all_companies = {**COMPANIES, **dynamic_companies}
+        if company_name not in all_companies:
+            discovered = discover_company(company_name)
+            if discovered:
+                dynamic_companies[company_name] = discovered
+                all_companies = {**COMPANIES, **dynamic_companies}
+            else:
+                reply = f"I couldn't find investor information for **{company_name}**. Please check the company name and try again."
+                return {"reply": reply, "session_id": payload.session_id}
+
+        # Start overview job in background
+        result = find_pdf_links(company_name, dynamic_companies)
+        pdf_docs = result["documents"]
+        current_urls = sorted(pdf_docs.values())
+        selected_pdfs = list(_filter_docs(pdf_docs).keys())
+        job_id = str(uuid.uuid4())
+        overview_jobs[job_id] = {
+            "status": "running", "step": "reading", "label": "Starting...",
+            "current": 0, "total": len(pdf_docs), "pdfs": list(pdf_docs.keys()),
+        }
+        background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls)
+        encoded = company_name.replace(" ", "%20")
+        reply = (
+            f"Starting analysis of **{company_name}**. "
+            f"Found {len(pdf_docs)} documents ({len(selected_pdfs)} selected for analysis). "
+            f"This will take 3-4 minutes.\n\n"
+            f"[View live progress here](/companies/{encoded}?job={job_id})"
+        )
+        return {"reply": reply, "session_id": payload.session_id, "job_id": job_id, "company": company_name}
+
     reply, session_id = send_message(payload.message, payload.documents, payload.session_id)
     return {"reply": reply, "session_id": session_id}
 

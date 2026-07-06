@@ -1,9 +1,13 @@
+import json
+import os
 import re
 from datetime import datetime, timedelta
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 COMPANIES = {
     "First Mining Gold": {
@@ -24,8 +28,83 @@ COMPANIES = {
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 
-def find_pdf_links(company_name: str) -> dict:
-    company = COMPANIES[company_name]
+def discover_company(company_name: str) -> dict | None:
+    """Use Gemini with Google Search to find a mining company's investor pages."""
+    key = os.environ["GEMINI_API_KEY"]
+    prompt = f"""Find the official investor relations website for the publicly traded mining company "{company_name}".
+
+Return ONLY a JSON object with these fields:
+{{
+  "base_url": "https://www.example.com",
+  "investor_pages": ["/investors/", "/investors/reports/"],
+  "about_pages": ["/about/team/"],
+  "news_page": "/news/"
+}}
+
+Rules:
+- base_url must be the company's official domain (no trailing slash)
+- investor_pages: pages that contain links to PDF documents like Annual Information Form, Management Information Circular, corporate presentations, financial statements
+- about_pages: management team or leadership page
+- news_page: press releases or news page
+- All paths must start with /
+- Return ONLY valid JSON, no explanation"""
+
+    resp = requests.post(
+        GEMINI_URL,
+        headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+        json={
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "tools": [{"google_search": {}}],
+        },
+        timeout=60,
+    )
+    if not resp.ok:
+        print(f"discover_company failed: {resp.status_code} {resp.text[:200]}")
+        return None
+    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group())
+    except Exception as e:
+        print(f"discover_company JSON parse error: {e}")
+        return None
+
+
+def _get_page_html(url: str) -> str:
+    """Fetch fully-rendered HTML using Playwright (handles JS-rendered sites)."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
+        try:
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            # Scroll to trigger lazy loading
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1500)
+            # Click any "Load More" / "Show More" buttons
+            for selector in [
+                "button:has-text('Load More')",
+                "button:has-text('Show More')",
+                "a:has-text('Load More')",
+                "button:has-text('View All')",
+            ]:
+                try:
+                    btn = page.query_selector(selector)
+                    if btn and btn.is_visible():
+                        btn.click()
+                        page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+            return page.content()
+        finally:
+            browser.close()
+
+
+def find_pdf_links(company_name: str, dynamic_companies: dict | None = None) -> dict:
+    all_companies = {**COMPANIES, **(dynamic_companies or {})}
+    company = all_companies[company_name]
     base_url = company["base_url"]
     pdf_links = {}
     page_errors = []
@@ -33,26 +112,28 @@ def find_pdf_links(company_name: str) -> dict:
     for page_path in company["investor_pages"]:
         url = base_url + page_path
         try:
-            response = requests.get(url, headers=HEADERS, timeout=20)
-            response.raise_for_status()
-        except requests.Timeout:
-            page_errors.append({"page": url, "reason": "Timed out — site took too long to respond"})
-            continue
-        except requests.HTTPError as e:
-            status = e.response.status_code if e.response is not None else None
-            if status == 403:
-                reason = "Blocked by the site (403 Forbidden) — it may be detecting automated requests"
-            elif status == 404:
-                reason = "Page not found (404) — the URL may have changed"
-            else:
-                reason = f"Site returned an error (HTTP {status})"
-            page_errors.append({"page": url, "reason": reason})
-            continue
-        except requests.RequestException as e:
-            page_errors.append({"page": url, "reason": f"Could not connect: {e}"})
-            continue
+            html = _get_page_html(url)
+        except Exception as e:
+            # Playwright failed — fall back to simple requests
+            try:
+                response = requests.get(url, headers=HEADERS, timeout=20)
+                response.raise_for_status()
+                html = response.text
+            except requests.HTTPError as he:
+                status = he.response.status_code if he.response is not None else None
+                if status == 403:
+                    reason = "Blocked by the site (403 Forbidden)"
+                elif status == 404:
+                    reason = "Page not found (404)"
+                else:
+                    reason = f"HTTP {status}"
+                page_errors.append({"page": url, "reason": reason})
+                continue
+            except Exception as re:
+                page_errors.append({"page": url, "reason": str(re)})
+                continue
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         for anchor in soup.find_all("a", href=True):
             href = urljoin(url, anchor["href"])
             if ".pdf" in href.lower():
@@ -71,37 +152,52 @@ def sanitize_filename(label: str) -> str:
     return cleaned.strip("_") or "document"
 
 
-def scrape_about_pages(company_name: str) -> str:
-    company = COMPANIES[company_name]
+def scrape_about_pages(company_name: str, dynamic_companies: dict | None = None) -> str:
+    all_companies = {**COMPANIES, **(dynamic_companies or {})}
+    company = all_companies[company_name]
     base_url = company["base_url"]
     texts = []
     for path in company.get("about_pages", []):
         url = base_url + path
         try:
-            r = requests.get(url, headers=HEADERS, timeout=15)
-            r.raise_for_status()
-            soup = BeautifulSoup(r.text, "html.parser")
-            text = soup.get_text(" ", strip=True)
-            texts.append(f"--- {url} ---\n{text}")
-        except Exception as e:
-            print(f"  Could not scrape {url}: {e}")
+            html = _get_page_html(url)
+        except Exception:
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=15)
+                r.raise_for_status()
+                html = r.text
+            except Exception as e:
+                print(f"  Could not scrape {url}: {e}")
+                continue
+        soup = BeautifulSoup(html, "html.parser")
+        text = soup.get_text(" ", strip=True)
+        texts.append(f"--- {url} ---\n{text}")
     return "\n\n".join(texts)
 
 
-def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10) -> list[dict]:
-    company = COMPANIES[company_name]
+def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10, dynamic_companies: dict | None = None) -> list[dict]:
+    all_companies = {**COMPANIES, **(dynamic_companies or {})}
+    company = all_companies[company_name]
     news_path = company.get("news_page")
     if not news_path:
         return []
 
     news_url = company["base_url"] + news_path
     try:
-        r = requests.get(news_url, headers=HEADERS, timeout=15)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
+        html = _get_page_html(news_url)
+    except Exception:
+        try:
+            r = requests.get(news_url, headers=HEADERS, timeout=15)
+            r.raise_for_status()
+            html = r.text
+        except Exception as e:
+            print(f"  Could not scrape news from {news_url}: {e}")
+            return []
+    try:
+        soup = BeautifulSoup(html, "html.parser")
         text = soup.get_text(" ", strip=True)
     except Exception as e:
-        print(f"  Could not scrape news from {news_url}: {e}")
+        print(f"  Could not parse news from {news_url}: {e}")
         return []
 
     # Parse "Mon DD, YYYY Headline text" pairs from page text

@@ -7,7 +7,7 @@ import pdfplumber
 import requests as http
 from supabase import create_client
 
-from scraping import fetch_pdf_bytes, scrape_about_pages, scrape_news
+from scraping import fetch_pdf_bytes, scrape_about_pages, scrape_news, discover_company
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
@@ -222,6 +222,41 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
         else:
             filtered[label] = url
     return filtered
+
+
+def detect_company_intent(message: str) -> str | None:
+    """Return the mining company name if the user wants an analysis, else None."""
+    key = os.environ["GEMINI_API_KEY"]
+    prompt = f"""A user sent this message to a mining stock analysis chatbot:
+
+"{message}"
+
+If the user is asking to analyze, research, scan, review, check, or get information about a specific mining company, return ONLY the company name exactly as the user wrote it.
+If the message is a general question, greeting, or anything other than a request to analyze a specific company, return ONLY the word "none".
+
+Examples:
+"analyze First Mining Gold" → First Mining Gold
+"can you look at Osisko Mining for me?" → Osisko Mining
+"what do you think about Agnico Eagle?" → Agnico Eagle
+"run a scan on Endeavour Silver" → Endeavour Silver
+"i want to see a report on Torex Gold" → Torex Gold
+"check out MAG Silver for me" → MAG Silver
+"what is NAV?" → none
+"how does the silver stream work?" → none
+"hello" → none
+
+Return ONLY the company name or the word none."""
+
+    resp = http.post(
+        GEMINI_URL,
+        headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+        json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
+        timeout=15,
+    )
+    if not resp.ok:
+        return None
+    result = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    return None if result.lower() == "none" else result
 
 
 def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=None) -> str:
