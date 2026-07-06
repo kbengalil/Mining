@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import requests as http
@@ -74,11 +75,10 @@ def clean_and_chunk(raw: str, speaker: str) -> list[dict]:
 The raw transcript is auto-generated: missing punctuation, capitalization errors, garbled technical terms.
 
 Your task:
-1. Clean the text (fix punctuation, capitalization, and mining/finance terms like NPV, IRR, NI 43-101, capex, opex, PEA, PFS, etc.)
+1. Clean the text (fix punctuation, capitalization, and mining/finance terms like NPV, IRR, NI 43-101, capex, opex, PEA, PFS, AISC, etc.)
 2. Split it into chunks where EACH chunk covers exactly ONE specific topic or idea.
 3. Give each chunk a descriptive title that includes the speaker name.
 4. Remove filler words, repeated phrases, and off-topic small talk.
-
 Return ONLY a valid JSON array — no markdown, no explanation:
 [
   {{"title": "{speaker} on jurisdiction risk", "content": "...cleaned text..."}},
@@ -112,9 +112,15 @@ def main():
     speaker = sys.argv[2]
     preview = "--preview" in sys.argv
 
-    print(f"Fetching transcript: {youtube_url}")
-    raw = fetch_transcript(youtube_url)
-    print(f"  {len(raw)} characters fetched.")
+    if youtube_url.startswith("--text-file="):
+        text_path = youtube_url.split("=", 1)[1]
+        raw = Path(text_path).read_text(encoding="utf-8")
+        youtube_url = text_path  # use file path as source_url
+        print(f"Reading from file: {text_path} ({len(raw)} characters)")
+    else:
+        print(f"Fetching transcript: {youtube_url}")
+        raw = fetch_transcript(youtube_url)
+        print(f"  {len(raw)} characters fetched.")
 
     print("Cleaning and chunking with Gemini...")
     chunks = clean_and_chunk(raw, speaker)

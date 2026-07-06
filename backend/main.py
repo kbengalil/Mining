@@ -15,7 +15,7 @@ from supabase import create_client
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from agent import generate_overview, send_message  # noqa: E402 — must import after load_dotenv populates env vars
+from agent import generate_overview, send_message, _filter_docs  # noqa: E402 — must import after load_dotenv populates env vars
 from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SECRET_KEY"])
@@ -152,6 +152,7 @@ def start_overview(company_name: str, background_tasks: BackgroundTasks, force: 
     pdf_docs = result["documents"]
     current_urls = sorted(pdf_docs.values())
     pdf_list = list(pdf_docs.keys())
+    selected_pdfs = list(_filter_docs(pdf_docs).keys())
 
     if not force:
         existing = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
@@ -160,6 +161,7 @@ def start_overview(company_name: str, background_tasks: BackgroundTasks, force: 
                 "cached": True,
                 "overview_markdown": existing.data[0]["overview_markdown"],
                 "pdfs": pdf_list,
+                "selected_pdfs": selected_pdfs,
             }
 
     job_id = str(uuid.uuid4())
@@ -172,7 +174,7 @@ def start_overview(company_name: str, background_tasks: BackgroundTasks, force: 
         "pdfs": pdf_list,
     }
     background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls)
-    return {"job_id": job_id, "pdfs": pdf_list, "cached": False}
+    return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": selected_pdfs, "cached": False}
 
 
 @app.get("/overview-jobs/{job_id}")

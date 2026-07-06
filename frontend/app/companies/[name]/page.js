@@ -6,10 +6,17 @@ import { useEffect, useRef, useState } from "react";
 
 const API = "http://127.0.0.1:8000";
 
-const STEPS = ["reading", "scraping", "rag", "generating"];
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+const STEPS = ["reading", "scraping", "news", "rag", "generating"];
 const STEP_LABELS = {
   reading: "Reading documents",
   scraping: "Scraping company website",
+  news: "Fetching recent news",
   rag: "Searching expert knowledge",
   generating: "Generating overview",
 };
@@ -19,11 +26,20 @@ export default function CompanyPage() {
   const companyName = decodeURIComponent(name);
 
   const [pdfs, setPdfs] = useState([]);
+  const [selectedPdfs, setSelectedPdfs] = useState([]);
   const [job, setJob] = useState(null);
   const [overview, setOverview] = useState(null);
   const [status, setStatus] = useState("starting"); // starting | running | done | error | cached
   const [error, setError] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [finalTime, setFinalTime] = useState(null);
   const pollRef = useRef(null);
+  const timerRef = useRef(null);
+  const startTimeRef = useRef(null);
+
+  useEffect(() => {
+    if (companyName) document.title = `${companyName} — Mining AI Analyst`;
+  }, [companyName]);
 
   useEffect(() => {
     if (!companyName) return;
@@ -33,11 +49,16 @@ export default function CompanyPage() {
       .then((r) => r.json())
       .then((data) => {
         setPdfs(data.pdfs || []);
+        setSelectedPdfs(data.selected_pdfs || []);
         if (data.cached) {
           setOverview(data.overview_markdown);
           setStatus("cached");
         } else {
           setStatus("running");
+          startTimeRef.current = Date.now();
+          timerRef.current = setInterval(() => {
+            setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+          }, 1000);
           pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
         }
       })
@@ -46,7 +67,7 @@ export default function CompanyPage() {
         setStatus("error");
       });
 
-    return () => clearInterval(pollRef.current);
+    return () => { clearInterval(pollRef.current); clearInterval(timerRef.current); };
   }, [companyName]);
 
   function pollJob(jobId) {
@@ -56,10 +77,13 @@ export default function CompanyPage() {
         setJob(data);
         if (data.status === "done") {
           clearInterval(pollRef.current);
+          clearInterval(timerRef.current);
+          setFinalTime(Math.floor((Date.now() - startTimeRef.current) / 1000));
           setOverview(data.overview_markdown);
           setStatus("done");
         } else if (data.status === "error") {
           clearInterval(pollRef.current);
+          clearInterval(timerRef.current);
           setError(data.error);
           setStatus("error");
         }
@@ -86,14 +110,27 @@ export default function CompanyPage() {
         <div className="mb-8">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
             Documents found ({pdfs.length})
+            {selectedPdfs.length > 0 && (
+              <span className="ml-2 text-green-600 normal-case font-normal">
+                · {selectedPdfs.length} used for analysis
+              </span>
+            )}
           </p>
           <ul className="space-y-1">
-            {pdfs.map((label, i) => (
-              <li key={i} className="text-sm text-gray-600 flex items-center gap-2">
-                <span className="text-gray-300">—</span>
-                {label}
-              </li>
-            ))}
+            {pdfs.map((label, i) => {
+              const isSelected = selectedPdfs.includes(label);
+              return (
+                <li key={i} className={`text-sm flex items-center gap-2 ${isSelected ? "text-gray-800" : "text-gray-400"}`}>
+                  <span className={isSelected ? "text-green-500 font-bold" : "text-gray-300"}>
+                    {isSelected ? "✓" : "—"}
+                  </span>
+                  <span className={isSelected ? "font-medium" : ""}>{label}</span>
+                  {isSelected && (
+                    <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded">used</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -140,11 +177,18 @@ export default function CompanyPage() {
         <p className="text-sm text-gray-400 mb-8">Finding documents...</p>
       )}
 
+      {status === "running" && (
+        <p className="text-xs text-gray-400 mb-2 font-mono">{formatTime(elapsed)}</p>
+      )}
+
       {/* Overview */}
       {(status === "done" || status === "cached") && overview && (
         <>
           {status === "cached" && (
             <p className="text-xs text-gray-400 mb-4">Loaded from cache — regenerates automatically when new documents are found.</p>
+          )}
+          {status === "done" && finalTime !== null && (
+            <p className="text-xs text-gray-400 mb-4">Generated in {formatTime(finalTime)}</p>
           )}
           <OverviewRenderer markdown={overview} />
         </>

@@ -1,3 +1,5 @@
+import re
+from datetime import datetime, timedelta
 from urllib.parse import urljoin
 
 import requests
@@ -10,10 +12,12 @@ COMPANIES = {
             "/investors/investor-downloads/",
             "/investors/reports-filings/financials/",
             "/investors/reports-filings/annual-information-form/",
+            "/investors/agm/",
         ],
         "about_pages": [
             "/about/management/",
         ],
+        "news_page": "/news/",
     }
 }
 
@@ -82,6 +86,56 @@ def scrape_about_pages(company_name: str) -> str:
         except Exception as e:
             print(f"  Could not scrape {url}: {e}")
     return "\n\n".join(texts)
+
+
+def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10) -> list[dict]:
+    company = COMPANIES[company_name]
+    news_path = company.get("news_page")
+    if not news_path:
+        return []
+
+    news_url = company["base_url"] + news_path
+    try:
+        r = requests.get(news_url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        text = soup.get_text(" ", strip=True)
+    except Exception as e:
+        print(f"  Could not scrape news from {news_url}: {e}")
+        return []
+
+    # Parse "Mon DD, YYYY Headline text" pairs from page text
+    date_re = re.compile(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s{1,3}(\d{1,2}),\s+(\d{4})")
+    matches = list(date_re.finditer(text))
+
+    items = []
+    for i, m in enumerate(matches):
+        date_str = m.group(0)
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else start + 300
+        headline = " ".join(text[start:end].split()).strip()[:250]
+        if len(headline) < 10:
+            continue
+        try:
+            date = datetime.strptime(date_str.replace("  ", " "), "%b %d, %Y")
+            items.append({"date": date, "date_str": date_str, "headline": headline})
+        except ValueError:
+            continue
+
+    # Newest first, deduplicate by headline
+    items.sort(key=lambda x: x["date"], reverse=True)
+    seen = set()
+    unique = []
+    for item in items:
+        if item["headline"] not in seen:
+            seen.add(item["headline"])
+            unique.append(item)
+
+    # 6-month window with min_items fallback, capped at max_items
+    cutoff = datetime.now() - timedelta(days=180)
+    recent = [i for i in unique if i["date"] >= cutoff]
+    result = recent if len(recent) >= min_items else unique
+    return result[:max_items]
 
 
 def fetch_pdf_bytes(url: str) -> bytes:

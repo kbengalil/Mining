@@ -7,7 +7,7 @@ import pdfplumber
 import requests as http
 from supabase import create_client
 
-from scraping import fetch_pdf_bytes, scrape_about_pages
+from scraping import fetch_pdf_bytes, scrape_about_pages, scrape_news
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
@@ -92,16 +92,22 @@ def _call_gemini(history: list) -> str:
     return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
-OVERVIEW_PROMPT = """You are the Mining AI Analyst. Produce a structured company overview for {company_name} using the investor documents, company website, and expert frameworks below.
+OVERVIEW_PROMPT = """You are the Mining AI Analyst. Produce a structured company overview for {company_name} using the investor documents, company website, recent news, and expert frameworks below.
 
 {rag_context}
 COMPANY WEBSITE (management & about pages):
 {about_text}
 
+RECENT NEWS (newest first):
+{news_text}
+
 COMPANY DOCUMENTS:
 {doc_texts}
 
-Write EXACTLY these 7 sections with markdown headers. Be concise and factual.
+Write EXACTLY these 9 sections with markdown headers. Be concise and factual.
+
+## Recent Developments
+Summarize the most significant news from the last 6 months. Focus on material events: permits, agreements, financings, drill results, project milestones. 3-5 bullet points. Note the date for each item.
 
 ## Company Snapshot
 3-5 bullet points. What the company mines, where, and development stage (exploration / PEA / PFS / feasibility / production).
@@ -111,6 +117,14 @@ Who founded the company, when, and a brief background on each founder. Note whet
 
 ## Management Team
 For EACH key executive and board member, write 4-5 lines covering: full name, title, total years of experience, key previous roles (specific company names and positions), and domain expertise. Use one sub-bullet per person.
+
+## Insider Ownership & Compensation
+From the Management Information Circular (proxy document):
+- Total shares owned or controlled by all directors and officers combined, as a % of total shares outstanding.
+- CEO shares owned or controlled specifically (number and %).
+- CEO total annual compensation, broken down into each component: Base Salary, Annual Bonus, Share-Based Awards (RSUs/PSUs), Option-Based Awards, Pension Value, Any Other Compensation, and Total.
+- If any component is nil or not applicable, state nil.
+- If the Management Information Circular is not among the provided documents, write "Management Information Circular not provided — figures not available."
 
 ## Key Project Metrics
 3-5 bullet points per project. Resource size, NPV (note whether pre-tax or after-tax), IRR, capex, mine life. Only include figures from the documents.
@@ -122,7 +136,52 @@ For EACH key executive and board member, write 4-5 lines covering: full name, ti
 3-5 bullet points. Country/region of main projects, any sovereign risk factors mentioned in the documents.
 
 ## Red Flags
-Factual observations only. Examples: "NPV figures are pre-tax only", "last technical study published in 2019", "cash position not disclosed in most recent filing". Omit bullets that do not apply.
+Work through EVERY item in the checklist below. For each one that applies, write a bullet with the specific factual observation. Then add any additional red flags you identify beyond this list.
+
+CHECKLIST — check every item:
+
+Technical Studies:
+- Are any PEA, PFS, or feasibility studies older than 3 years? State the study name and its effective date.
+- Are any Mineral Resource Estimates (MRE) older than 3 years? State the project name and effective date.
+- Is any project still at PEA stage? (PEAs use inferred resources which are too speculative to be classified as mineral reserves.)
+
+Valuation:
+- Are NPV figures pre-tax or post-tax? Flag if pre-tax only.
+- What gold/commodity price was assumed in the BASE CASE of each study? ONLY flag this if the base case assumed price is ABOVE the current gold price (which inflates the NPV). Ignore spot-price or sensitivity scenarios — only the base case assumption matters. If the base case price is below current gold price, skip this item entirely — do not mention it.
+- Are government carried interests, royalties, and taxes fully netted out of the investor-level NPV, or is the NPV stated at project level only?
+
+Dilution:
+- Has the company completed private placements or public offerings in the last 3 years? List dates and amounts.
+- Is the total share count growing year over year?
+- Are there warrants or stock options outstanding that would further dilute shareholders?
+
+Legal & Environmental:
+- Any indigenous rights disputes, permit challenges, or court proceedings? State current status if known.
+- Any legacy environmental liabilities (tailings, contamination, remediation obligations)? State amounts if disclosed.
+- Any other ongoing litigation?
+
+Financials:
+- Is the current cash position disclosed? If yes, estimate runway based on burn rate. If not disclosed, flag it.
+- Any significant debt or outstanding financial obligations?
+- Compare current cash on hand to the total initial capex required for each project. State the gap explicitly and flag if the company has no disclosed plan (debt facility, strategic partner, streaming deal) to finance the difference.
+
+Infrastructure:
+- Is each project accessible by all-season road? If not, state the current access method and flag the infrastructure gap as a prerequisite for construction.
+
+Jurisdiction:
+- Are any projects located in high sovereign risk countries (outside Canada, Australia, USA, Scandinavia)?
+
+Management:
+- Any evidence of insider selling in the documents? (Insider buying is positive; omit if no data.)
+
+Business Stage:
+- Has the company ever produced metal commercially? If not, state this explicitly.
+- Is the company entirely dependent on equity financing to fund operations? If so, state the implication: the company must continuously issue shares (diluting existing shareholders) to survive.
+- Are there any streaming or royalty agreements that reduce the company's share of future revenue? List each stream: commodity, percentage sold, payment terms, and counterparty.
+
+After completing the checklist, add any additional red flags you identify that are not covered above.
+Cross-reference with Recent News: if a red flag from the documents has been resolved in a recent press release, keep the bullet but append "— Resolved per [date] press release."
+Omit any checklist item where there is genuinely nothing to flag — do not write "no issues found" for clean items.
 
 RULES:
 - Do not invent data. If something is not in the documents or website, write "Not disclosed."
@@ -132,25 +191,33 @@ RULES:
 
 
 def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
-    """Keep only the most recent AIF; skip older AIFs and ESTMA."""
+    """Keep only the most recent AIF and most recent MIC; skip older ones and ESTMA."""
     import re
     aif_pattern = re.compile(r"Annual Information Form.*?(\d{4})", re.IGNORECASE)
+    mic_pattern = re.compile(r"(Management Information Circular|Information Circular).*?(\d{4})", re.IGNORECASE)
     skip_patterns = [re.compile(r"ESTMA", re.IGNORECASE)]
 
-    best_aif_year = -1
-    best_aif_key = None
-    for label in pdf_docs:
-        m = aif_pattern.search(label)
-        if m and int(m.group(1)) > best_aif_year:
-            best_aif_year = int(m.group(1))
-            best_aif_key = label
+    def best_by_year(pattern, group):
+        best_year, best_key = -1, None
+        for label in pdf_docs:
+            m = pattern.search(label)
+            if m and int(m.group(group)) > best_year:
+                best_year = int(m.group(group))
+                best_key = label
+        return best_key
+
+    best_aif = best_by_year(aif_pattern, 1)
+    best_mic = best_by_year(mic_pattern, 2)
 
     filtered = {}
     for label, url in pdf_docs.items():
         if any(p.search(label) for p in skip_patterns):
             continue
         if aif_pattern.search(label):
-            if label == best_aif_key:
+            if label == best_aif:
+                filtered[label] = url
+        elif mic_pattern.search(label):
+            if label == best_mic:
                 filtered[label] = url
         else:
             filtered[label] = url
@@ -185,6 +252,14 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
     about_text = scrape_about_pages(company_name)
 
     if on_progress:
+        on_progress({"step": "news", "label": "Fetching recent news...", "current": 1, "total": 1})
+    news_items = scrape_news(company_name)
+    if news_items:
+        news_text = "\n".join(f"- {i['date_str']}: {i['headline']}" for i in news_items)
+    else:
+        news_text = "No recent news found."
+
+    if on_progress:
         on_progress({"step": "rag", "label": "Searching expert knowledge base...", "current": 1, "total": 1})
     rag_chunks = _search_rag(
         "mining company NPV IRR capex management quality jurisdiction risk red flags investment analysis",
@@ -204,7 +279,13 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
         company_name=company_name,
         rag_context=rag_context,
         about_text=about_text or "Not available.",
+        news_text=news_text,
         doc_texts="\n\n".join(doc_texts),
+    )
+    # Save the full assembled prompt so other LLMs can be tested on identical input
+    import pathlib
+    pathlib.Path(__file__).resolve().parent.joinpath("last_prompt.txt").write_text(
+        prompt, encoding="utf-8"
     )
     history = [{"role": "user", "parts": [{"text": prompt}]}]
     return _call_gemini(history)
