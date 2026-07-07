@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -192,14 +193,21 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
 
 
+_URL_RE = re.compile(r"https?://[^\s]+")
+
+
 @app.post("/chat")
 def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
     # Check if user wants to analyze a specific company
     company_name = detect_company_intent(payload.message)
     if company_name:
+        # Extract a URL if the user provided one (e.g. "analyze Osisko Mining https://...")
+        url_match = _URL_RE.search(payload.message)
+        provided_url = url_match.group(0).rstrip(".,)") if url_match else None
+
         all_companies = {**COMPANIES, **dynamic_companies}
         if company_name not in all_companies:
-            discovered = discover_company(company_name)
+            discovered = discover_company(company_name, base_url=provided_url)
             if discovered:
                 dynamic_companies[company_name] = discovered
                 all_companies = {**COMPANIES, **dynamic_companies}
@@ -208,6 +216,8 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
                 return {"reply": reply, "session_id": payload.session_id}
 
         # Start overview job in background
+        company_info = all_companies[company_name]
+        base_url = company_info.get("base_url", "")
         result = find_pdf_links(company_name, dynamic_companies)
         pdf_docs = result["documents"]
         current_urls = sorted(pdf_docs.values())
@@ -221,6 +231,7 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
         encoded = company_name.replace(" ", "%20")
         reply = (
             f"Starting analysis of **{company_name}**. "
+            f"Website: {base_url}\n\n"
             f"Found {len(pdf_docs)} documents ({len(selected_pdfs)} selected for analysis). "
             f"This will take 3-4 minutes.\n\n"
             f"[View live progress here](/companies/{encoded}?job={job_id})"

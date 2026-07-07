@@ -28,10 +28,41 @@ COMPANIES = {
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 
-def discover_company(company_name: str) -> dict | None:
-    """Use Gemini with Google Search to find a mining company's investor pages."""
+def discover_company(company_name: str, base_url: str | None = None) -> dict | None:
+    """Find a mining company's investor page paths.
+
+    If base_url is provided, skips Google Search and asks Gemini to find
+    the sub-page paths on the known domain. Otherwise uses Google Search
+    grounding to find the domain first.
+    """
     key = os.environ["GEMINI_API_KEY"]
-    prompt = f"""Find the official investor relations website for the publicly traded mining company "{company_name}".
+
+    if base_url:
+        # User provided the URL — just find the sub-pages on that domain
+        base_url = base_url.rstrip("/")
+        prompt = f"""The mining company "{company_name}" has its website at {base_url}.
+
+Find the correct paths on this website for:
+- investor_pages: pages that contain PDF documents (Annual Information Form, Management Information Circular, corporate presentations, financial statements)
+- about_pages: management team or leadership page
+- news_page: press releases or news page
+
+Return ONLY a JSON object:
+{{
+  "base_url": "{base_url}",
+  "investor_pages": ["/investors/", "/investors/reports/"],
+  "about_pages": ["/about/team/"],
+  "news_page": "/news/"
+}}
+
+Rules:
+- All paths must start with /
+- Return ONLY valid JSON, no explanation"""
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        }
+    else:
+        prompt = f"""Find the official investor relations website for the publicly traded mining company "{company_name}".
 
 Return ONLY a JSON object with these fields:
 {{
@@ -48,14 +79,15 @@ Rules:
 - news_page: press releases or news page
 - All paths must start with /
 - Return ONLY valid JSON, no explanation"""
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "tools": [{"google_search": {}}],
+        }
 
     resp = requests.post(
         GEMINI_URL,
         headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-        json={
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "tools": [{"google_search": {}}],
-        },
+        json=payload,
         timeout=60,
     )
     if not resp.ok:
