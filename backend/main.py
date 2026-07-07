@@ -17,7 +17,7 @@ from supabase import create_client
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from agent import generate_overview, send_message, _filter_docs, detect_company_intent  # noqa: E402
-from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename, discover_company
+from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename, discover_company, identify_company_from_url
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SECRET_KEY"])
 
@@ -136,7 +136,7 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
         job.update(info)
 
     try:
-        overview_md = generate_overview(company_name, pdf_docs, on_progress)
+        overview_md = generate_overview(company_name, pdf_docs, on_progress, dynamic_companies)
         _save_overview(company_name, overview_md, current_urls)
         job["status"] = "done"
         job["overview_markdown"] = overview_md
@@ -198,12 +198,18 @@ _URL_RE = re.compile(r"https?://[^\s]+")
 
 @app.post("/chat")
 def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
+    # Extract URL if present
+    url_match = _URL_RE.search(payload.message)
+    provided_url = url_match.group(0).rstrip(".,)/\\ ") if url_match else None
+
     # Check if user wants to analyze a specific company
     company_name = detect_company_intent(payload.message)
+
+    # URL provided but no company name detected — identify from URL
+    if not company_name and provided_url:
+        company_name = identify_company_from_url(provided_url)
+
     if company_name:
-        # Extract a URL if the user provided one (e.g. "analyze Osisko Mining https://...")
-        url_match = _URL_RE.search(payload.message)
-        provided_url = url_match.group(0).rstrip(".,)") if url_match else None
 
         all_companies = {**COMPANIES, **dynamic_companies}
         if company_name not in all_companies:
@@ -226,6 +232,7 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
         overview_jobs[job_id] = {
             "status": "running", "step": "reading", "label": "Starting...",
             "current": 0, "total": len(pdf_docs), "pdfs": list(pdf_docs.keys()),
+            "selected_pdfs": selected_pdfs,
         }
         background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls)
         encoded = company_name.replace(" ", "%20")

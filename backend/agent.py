@@ -2,6 +2,7 @@ import io
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pdfplumber
 import requests as http
@@ -259,36 +260,55 @@ Return ONLY the company name or the word none."""
     return None if result.lower() == "none" else result
 
 
-def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=None) -> str:
+def _read_one_pdf(args):
+    label, url = args
+    try:
+        return label, _extract_text(fetch_pdf_bytes(url)), None
+    except Exception as e:
+        return label, None, str(e)
+
+
+def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=None, dynamic_companies: dict | None = None) -> str:
     pdf_docs = _filter_docs(pdf_docs)
     total = len(pdf_docs)
+    completed = 0
+    raw_results = {}
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_read_one_pdf, (label, url)): label for label, url in pdf_docs.items()}
+        for future in as_completed(futures):
+            label, text, error = future.result()
+            completed += 1
+            if on_progress:
+                on_progress({"step": "reading", "label": f"Reading: {label}", "current": completed, "total": total})
+            if text:
+                raw_results[label] = text
+            else:
+                print(f"  Skipping {label}: {error}")
+
+    # Deduplicate by content fingerprint
     seen_hashes = set()
     doc_texts = []
-
-    for i, (label, url) in enumerate(pdf_docs.items(), 1):
-        if on_progress:
-            on_progress({"step": "reading", "label": f"Reading: {label}", "current": i, "total": total})
-        try:
-            text = _extract_text(fetch_pdf_bytes(url))
-            # Skip duplicate documents (same content, different label)
-            fingerprint = text[:500]
-            if fingerprint in seen_hashes:
-                continue
-            seen_hashes.add(fingerprint)
-            doc_texts.append(f"--- {label} ---\n{text}")
-        except Exception as e:
-            print(f"  Skipping {label}: {e}")
+    for label in pdf_docs:  # preserve original order
+        text = raw_results.get(label)
+        if not text:
+            continue
+        fingerprint = text[:500]
+        if fingerprint in seen_hashes:
+            continue
+        seen_hashes.add(fingerprint)
+        doc_texts.append(f"--- {label} ---\n{text}")
 
     if not doc_texts:
         raise ValueError(f"Could not read any documents for {company_name}")
 
     if on_progress:
         on_progress({"step": "scraping", "label": "Scraping company website...", "current": 1, "total": 1})
-    about_text = scrape_about_pages(company_name)
+    about_text = scrape_about_pages(company_name, dynamic_companies)
 
     if on_progress:
         on_progress({"step": "news", "label": "Fetching recent news...", "current": 1, "total": 1})
-    news_items = scrape_news(company_name)
+    news_items = scrape_news(company_name, dynamic_companies=dynamic_companies)
     if news_items:
         news_text = "\n".join(f"- {i['date_str']}: {i['headline']}" for i in news_items)
     else:

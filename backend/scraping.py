@@ -28,6 +28,21 @@ COMPANIES = {
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 
+def identify_company_from_url(url: str) -> str | None:
+    """Ask Gemini to identify a mining company from its website URL."""
+    key = os.environ["GEMINI_API_KEY"]
+    prompt = f'What is the official name of the publicly traded mining company at {url}? Return ONLY the company name, nothing else.'
+    resp = requests.post(
+        GEMINI_URL,
+        headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+        json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
+        timeout=30,
+    )
+    if not resp.ok:
+        return None
+    return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
 def discover_company(company_name: str, base_url: str | None = None) -> dict | None:
     """Find a mining company's investor page paths.
 
@@ -109,7 +124,11 @@ def _get_page_html(url: str) -> str:
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            ignore_https_errors=True,
+        )
+        page = ctx.new_page()
         try:
             page.goto(url, wait_until="networkidle", timeout=30000)
             # Scroll to trigger lazy loading
@@ -131,6 +150,7 @@ def _get_page_html(url: str) -> str:
                     pass
             return page.content()
         finally:
+            ctx.close()
             browser.close()
 
 
@@ -148,7 +168,7 @@ def find_pdf_links(company_name: str, dynamic_companies: dict | None = None) -> 
         except Exception as e:
             # Playwright failed — fall back to simple requests
             try:
-                response = requests.get(url, headers=HEADERS, timeout=20)
+                response = requests.get(url, headers=HEADERS, timeout=20, verify=False)
                 response.raise_for_status()
                 html = response.text
             except requests.HTTPError as he:

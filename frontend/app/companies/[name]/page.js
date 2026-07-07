@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const API = "http://127.0.0.1:8000";
@@ -23,7 +23,9 @@ const STEP_LABELS = {
 
 export default function CompanyPage() {
   const { name } = useParams();
+  const searchParams = useSearchParams();
   const companyName = decodeURIComponent(name);
+  const existingJobId = searchParams.get("job");
 
   const [pdfs, setPdfs] = useState([]);
   const [selectedPdfs, setSelectedPdfs] = useState([]);
@@ -44,37 +46,50 @@ export default function CompanyPage() {
   useEffect(() => {
     if (!companyName) return;
 
-    const forceRegen = new URLSearchParams(window.location.search).get("force") === "true";
-    fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start?force=${forceRegen}`, { method: "POST" })
-      .then((r) => r.json())
-      .then((data) => {
-        setPdfs(data.pdfs || []);
-        setSelectedPdfs(data.selected_pdfs || []);
-        if (data.cached) {
-          setOverview(data.overview_markdown);
-          setStatus("cached");
-        } else {
-          setStatus("running");
-          startTimeRef.current = Date.now();
-          timerRef.current = setInterval(() => {
-            setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-          }, 1000);
-          pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
-        }
-      })
-      .catch((e) => {
-        setError(e.message);
-        setStatus("error");
-      });
+    if (existingJobId) {
+      // Job already started from chat — poll it directly
+      setStatus("running");
+      startTimeRef.current = Date.now();
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      }, 1000);
+      pollRef.current = setInterval(() => pollJob(existingJobId), 1000);
+    } else {
+      const forceRegen = new URLSearchParams(window.location.search).get("force") === "true";
+      fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start?force=${forceRegen}`, { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          setPdfs(data.pdfs || []);
+          setSelectedPdfs(data.selected_pdfs || []);
+          if (data.cached) {
+            setOverview(data.overview_markdown);
+            setStatus("cached");
+          } else {
+            setStatus("running");
+            startTimeRef.current = Date.now();
+            timerRef.current = setInterval(() => {
+              setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+            }, 1000);
+            pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
+          }
+        })
+        .catch((e) => {
+          setError(e.message);
+          setStatus("error");
+        });
+    }
 
     return () => { clearInterval(pollRef.current); clearInterval(timerRef.current); };
-  }, [companyName]);
+  }, [companyName, existingJobId]);
 
   function pollJob(jobId) {
     fetch(`${API}/overview-jobs/${jobId}`)
       .then((r) => r.json())
       .then((data) => {
         setJob(data);
+        // Populate pdfs from job data when navigating from chat
+        if (data.pdfs) setPdfs((prev) => prev.length === 0 ? data.pdfs : prev);
+        if (data.selected_pdfs) setSelectedPdfs((prev) => prev.length === 0 ? data.selected_pdfs : prev);
         if (data.status === "done") {
           clearInterval(pollRef.current);
           clearInterval(timerRef.current);
@@ -95,11 +110,15 @@ export default function CompanyPage() {
 
   return (
     <main className="max-w-2xl mx-auto p-8">
-      <Link href="/" className="text-sm text-gray-400 hover:text-gray-700 mb-6 block">
-        ← Chat
-      </Link>
-
-      <h1 className="text-2xl font-bold mb-6">{companyName}</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">{companyName}</h1>
+        <Link
+          href="/"
+          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+        >
+          ← Back to Chat
+        </Link>
+      </div>
 
       {status === "error" && (
         <div className="bg-red-50 text-red-700 rounded-lg p-4 text-sm mb-6">{error}</div>
