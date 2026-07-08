@@ -346,6 +346,32 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
     return _call_gemini(history)
 
 
+def send_message_with_overview(message: str, overview_md: str, company_name: str, session_id: str | None) -> tuple[str, str]:
+    """Answer a question using a pre-loaded company overview as context."""
+    if session_id is None or session_id not in chat_sessions:
+        session_id = str(uuid.uuid4())
+        chat_sessions[session_id] = []
+        context = f"Here is the research report for {company_name}:\n\n{overview_md}"
+        chat_sessions[session_id].append({"role": "user", "parts": [{"text": context}]})
+        chat_sessions[session_id].append({"role": "model", "parts": [{"text": f"I have the research report for {company_name}. What would you like to know?"}]})
+
+    rag_chunks = _search_rag(message)
+    if rag_chunks:
+        rag_context = "Relevant expert knowledge:\n\n"
+        for chunk in rag_chunks:
+            rag_context += f"[{chunk['title']}]\n{chunk['content']}\n\n"
+        augmented_message = f"{rag_context}---\n\nUser question: {message}"
+    else:
+        augmented_message = message
+
+    history = chat_sessions[session_id]
+    history.append({"role": "user", "parts": [{"text": augmented_message}]})
+    reply = _call_gemini(history)
+    history[-1] = {"role": "user", "parts": [{"text": message}]}
+    history.append({"role": "model", "parts": [{"text": reply}]})
+    return reply, session_id
+
+
 def send_message(message: str, documents: dict[str, str], session_id: str | None) -> tuple[str, str]:
     if session_id is None or session_id not in chat_sessions:
         session_id = str(uuid.uuid4())

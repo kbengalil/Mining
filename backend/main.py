@@ -16,7 +16,7 @@ from supabase import create_client
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from agent import generate_overview, send_message, _filter_docs, detect_company_intent  # noqa: E402
+from agent import generate_overview, send_message, send_message_with_overview, _filter_docs, detect_company_intent  # noqa: E402
 from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename, discover_company, identify_company_from_url
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SECRET_KEY"])
@@ -40,6 +40,20 @@ def health():
 @app.get("/companies")
 def list_companies():
     return list({**COMPANIES, **dynamic_companies}.keys())
+
+
+@app.get("/analyzed-companies")
+def analyzed_companies():
+    rows = supabase.table("company_overviews").select("company_name, generated_at").order("generated_at", desc=True).execute()
+    return [r["company_name"] for r in (rows.data or [])]
+
+
+@app.get("/companies/{company_name}/overview")
+def get_cached_overview(company_name: str):
+    row = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="No cached report")
+    return row.data[0]
 
 
 @app.get("/companies/{company_name}/documents")
@@ -211,6 +225,22 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
 
     if company_name:
 
+        # Check cache first — answer from existing report if available
+        cached_row = supabase.table("company_overviews").select("overview_markdown, generated_at").eq("company_name", company_name).limit(1).execute()
+        if cached_row.data:
+            overview_md = cached_row.data[0]["overview_markdown"]
+            generated_at = cached_row.data[0]["generated_at"][:10]  # date only
+            reply, session_id = send_message_with_overview(payload.message, overview_md, company_name, payload.session_id)
+            encoded = company_name.replace(" ", "%20")
+            return {
+                "reply": reply,
+                "session_id": session_id,
+                "company": company_name,
+                "cached": True,
+                "report_url": f"/companies/{encoded}",
+                "generated_at": generated_at,
+            }
+
         all_companies = {**COMPANIES, **dynamic_companies}
         if company_name not in all_companies:
             discovered = discover_company(company_name, base_url=provided_url)
@@ -221,7 +251,7 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
                 reply = f"I couldn't find investor information for **{company_name}**. Please check the company name and try again."
                 return {"reply": reply, "session_id": payload.session_id}
 
-        # Start overview job in background
+        # No cache — start overview job in background
         company_info = all_companies[company_name]
         base_url = company_info.get("base_url", "")
         result = find_pdf_links(company_name, dynamic_companies)

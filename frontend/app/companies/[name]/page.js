@@ -55,32 +55,38 @@ export default function CompanyPage() {
       }, 1000);
       pollRef.current = setInterval(() => pollJob(existingJobId), 1000);
     } else {
-      const forceRegen = new URLSearchParams(window.location.search).get("force") === "true";
-      fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start?force=${forceRegen}`, { method: "POST" })
-        .then((r) => r.json())
-        .then((data) => {
-          setPdfs(data.pdfs || []);
-          setSelectedPdfs(data.selected_pdfs || []);
-          if (data.cached) {
-            setOverview(data.overview_markdown);
+      // First check if a cached report exists — show it immediately
+      fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((cached) => {
+          if (cached) {
+            setOverview(cached.overview_markdown);
             setStatus("cached");
           } else {
-            setStatus("running");
-            startTimeRef.current = Date.now();
-            timerRef.current = setInterval(() => {
-              setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-            }, 1000);
-            pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
+            startAnalysis();
           }
         })
-        .catch((e) => {
-          setError(e.message);
-          setStatus("error");
-        });
+        .catch(() => startAnalysis());
     }
 
     return () => { clearInterval(pollRef.current); clearInterval(timerRef.current); };
   }, [companyName, existingJobId]);
+
+  function startAnalysis() {
+    fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start?force=true`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        setPdfs(data.pdfs || []);
+        setSelectedPdfs(data.selected_pdfs || []);
+        setStatus("running");
+        startTimeRef.current = Date.now();
+        timerRef.current = setInterval(() => {
+          setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+        }, 1000);
+        pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
+      })
+      .catch((e) => { setError(e.message); setStatus("error"); });
+  }
 
   function pollJob(jobId) {
     fetch(`${API}/overview-jobs/${jobId}`)
@@ -112,12 +118,22 @@ export default function CompanyPage() {
     <main className="max-w-2xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">{companyName}</h1>
-        <Link
-          href="/"
-          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-        >
-          ← Back to Chat
-        </Link>
+        <div className="flex gap-2">
+          {status === "cached" && (
+            <button
+              onClick={startAnalysis}
+              className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
+            >
+              ↻ Regenerate
+            </button>
+          )}
+          <Link
+            href="/"
+            className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            ← Back to Chat
+          </Link>
+        </div>
       </div>
 
       {status === "error" && (

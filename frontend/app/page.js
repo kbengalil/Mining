@@ -20,13 +20,52 @@ function formatTime(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+const INITIAL_MESSAGE = { role: "bot", text: "Hello! I'm the Mining AI Analyst. Ask me anything about mining stocks, or paste a company's investor relations URL to run a full analysis." };
+
 export default function ChatPage() {
-  const [messages, setMessages] = useState([
-    { role: "bot", text: "Hello! I'm the Mining AI Analyst. Ask me anything about mining stocks, or paste a company's investor relations URL to run a full analysis." },
-  ]);
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("chat_messages");
+      return saved ? JSON.parse(saved) : [INITIAL_MESSAGE];
+    } catch { return [INITIAL_MESSAGE]; }
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
+  const [sessionId, setSessionId] = useState(() => {
+    try { return sessionStorage.getItem("chat_session_id") || null; } catch { return null; }
+  });
+  const [analyzedCompanies, setAnalyzedCompanies] = useState([]);
+
+  // Persist messages and sessionId to sessionStorage on every change
+  useEffect(() => {
+    try { sessionStorage.setItem("chat_messages", JSON.stringify(messages)); } catch {}
+  }, [messages]);
+
+  useEffect(() => {
+    try {
+      if (sessionId) sessionStorage.setItem("chat_session_id", sessionId);
+    } catch {}
+  }, [sessionId]);
+
+  useEffect(() => {
+    fetch(`${API}/analyzed-companies`)
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setAnalyzedCompanies(data); })
+      .catch(() => {});
+  }, []);
+
+  function clearChat() {
+    setMessages([INITIAL_MESSAGE]);
+    setSessionId(null);
+    setActiveJob(null);
+    setPdfs([]);
+    setSelectedPdfs([]);
+    setJobData(null);
+    setJobStatus(null);
+    clearInterval(pollRef.current);
+    clearInterval(timerRef.current);
+    try { sessionStorage.removeItem("chat_messages"); sessionStorage.removeItem("chat_session_id"); } catch {}
+  }
 
   // Analysis panel state
   const [activeJob, setActiveJob] = useState(null); // { jobId, companyName }
@@ -89,8 +128,18 @@ export default function ChatPage() {
       });
       const data = await res.json();
 
-      if (data.job_id && data.company) {
-        // Analysis started — show left panel and start polling
+      if (data.cached && data.company) {
+        // Cached report exists — answer came from it, show link to full report
+        setSessionId(data.session_id);
+        setMessages((m) => [...m, {
+          role: "bot",
+          text: data.reply,
+          reportUrl: data.report_url,
+          reportLabel: data.company,
+          generatedAt: data.generated_at,
+        }]);
+      } else if (data.job_id && data.company) {
+        // No cache — analysis started, show left panel and start polling
         setActiveJob({ jobId: data.job_id, companyName: data.company });
         setPdfs([]);
         setSelectedPdfs([]);
@@ -205,25 +254,53 @@ export default function ChatPage() {
       <main className="flex flex-col flex-1 max-w-2xl mx-auto p-4">
         {/* Header */}
         <div className="flex items-center justify-between py-3 border-b border-gray-100 mb-4">
-          <h1 className="font-semibold text-gray-800">Mining AI Analyst</h1>
-          <Link
-            href={`/companies/${encodeURIComponent("First Mining Gold")}`}
-            className="text-sm px-3 py-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors"
-          >
-            First Mining Gold →
-          </Link>
+          <div className="flex items-center gap-3">
+            <h1 className="font-semibold text-gray-800">Mining AI Analyst</h1>
+            <button
+              onClick={clearChat}
+              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              Clear chat
+            </button>
+          </div>
+          <div className="flex gap-2 flex-wrap justify-end">
+            {analyzedCompanies.map((name) => (
+              <Link
+                key={name}
+                href={`/companies/${encodeURIComponent(name)}`}
+                className="text-sm px-3 py-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                {name} →
+              </Link>
+            ))}
+          </div>
         </div>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto space-y-4 pb-4">
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                m.role === "user"
-                  ? "bg-gray-900 text-white rounded-br-sm"
-                  : "bg-gray-100 text-gray-800 rounded-bl-sm"
-              }`}>
-                {m.text}
+              <div className="max-w-[85%] flex flex-col gap-2">
+                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                  m.role === "user"
+                    ? "bg-gray-900 text-white rounded-br-sm"
+                    : "bg-gray-100 text-gray-800 rounded-bl-sm"
+                }`}>
+                  {m.text}
+                </div>
+                {m.reportUrl && (
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={m.reportUrl}
+                      className="text-sm px-3 py-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                    >
+                      View Full Report →
+                    </Link>
+                    {m.generatedAt && (
+                      <span className="text-xs text-gray-400">generated {m.generatedAt}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}
