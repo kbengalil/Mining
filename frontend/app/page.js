@@ -23,18 +23,21 @@ function formatTime(seconds) {
 const INITIAL_MESSAGE = { role: "bot", text: "Hello! I'm the Mining AI Analyst. Ask me anything about mining stocks, or paste a company's investor relations URL to run a full analysis." };
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem("chat_messages");
-      return saved ? JSON.parse(saved) : [INITIAL_MESSAGE];
-    } catch { return [INITIAL_MESSAGE]; }
-  });
+  const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState(() => {
-    try { return sessionStorage.getItem("chat_session_id") || null; } catch { return null; }
-  });
+  const [sessionId, setSessionId] = useState(null);
   const [analyzedCompanies, setAnalyzedCompanies] = useState([]);
+
+  // Load persisted chat from sessionStorage after mount (client-only)
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("chat_messages");
+      if (saved) setMessages(JSON.parse(saved));
+      const savedSession = sessionStorage.getItem("chat_session_id");
+      if (savedSession) setSessionId(savedSession);
+    } catch {}
+  }, []);
 
   // Persist messages and sessionId to sessionStorage on every change
   useEffect(() => {
@@ -251,29 +254,16 @@ export default function ChatPage() {
       </div>
 
       {/* RIGHT PANEL — chat */}
-      <main className="flex flex-col flex-1 max-w-2xl mx-auto p-4">
+      <main className="flex flex-col flex-1 max-w-2xl mx-auto p-4 min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between py-3 border-b border-gray-100 mb-4">
-          <div className="flex items-center gap-3">
-            <h1 className="font-semibold text-gray-800">Mining AI Analyst</h1>
-            <button
-              onClick={clearChat}
-              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              Clear chat
-            </button>
-          </div>
-          <div className="flex gap-2 flex-wrap justify-end">
-            {analyzedCompanies.map((name) => (
-              <Link
-                key={name}
-                href={`/companies/${encodeURIComponent(name)}`}
-                className="text-sm px-3 py-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors"
-              >
-                {name} →
-              </Link>
-            ))}
-          </div>
+        <div className="flex items-center gap-3 py-3 border-b border-gray-100 mb-4">
+          <h1 className="font-semibold text-gray-800">Mining AI Analyst</h1>
+          <button
+            onClick={clearChat}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            Clear chat
+          </button>
         </div>
 
         {/* Messages */}
@@ -331,6 +321,22 @@ export default function ChatPage() {
           </button>
         </div>
       </main>
+
+      {/* RIGHT SIDEBAR — analyzed companies */}
+      {analyzedCompanies.length > 0 && (
+        <div className="flex-shrink-0 w-44 p-4 pt-6 flex flex-col gap-2 border-l border-gray-100">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Reports</p>
+          {analyzedCompanies.map((name) => (
+            <Link
+              key={name}
+              href={`/companies/${encodeURIComponent(name)}`}
+              className="text-xs px-3 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors text-left"
+            >
+              {name} →
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
