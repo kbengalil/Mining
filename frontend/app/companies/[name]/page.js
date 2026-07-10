@@ -29,6 +29,7 @@ export default function CompanyPage() {
 
   const [pdfs, setPdfs] = useState([]);
   const [selectedPdfs, setSelectedPdfs] = useState([]);
+  const [pdfUrls, setPdfUrls] = useState({});
   const [job, setJob] = useState(null);
   const [overview, setOverview] = useState(null);
   const [status, setStatus] = useState("starting"); // starting | running | done | error | cached
@@ -61,6 +62,15 @@ export default function CompanyPage() {
         .then((cached) => {
           if (cached) {
             setOverview(cached.overview_markdown);
+            if (cached.source_urls) {
+              const map = {};
+              cached.source_urls.forEach((url) => {
+                const label = decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, ""));
+                map[label] = url;
+              });
+              setPdfUrls(map);
+              setPdfs(Object.keys(map));
+            }
             setStatus("cached");
           } else {
             startAnalysis();
@@ -78,6 +88,7 @@ export default function CompanyPage() {
       .then((data) => {
         setPdfs(data.pdfs || []);
         setSelectedPdfs(data.selected_pdfs || []);
+        if (data.pdf_urls) setPdfUrls(data.pdf_urls);
         setStatus("running");
         startTimeRef.current = Date.now();
         timerRef.current = setInterval(() => {
@@ -96,6 +107,7 @@ export default function CompanyPage() {
         // Populate pdfs from job data when navigating from chat
         if (data.pdfs) setPdfs((prev) => prev.length === 0 ? data.pdfs : prev);
         if (data.selected_pdfs) setSelectedPdfs((prev) => prev.length === 0 ? data.selected_pdfs : prev);
+        if (data.pdf_urls) setPdfUrls((prev) => Object.keys(prev).length === 0 ? data.pdf_urls : prev);
         if (data.status === "done") {
           clearInterval(pollRef.current);
           clearInterval(timerRef.current);
@@ -128,6 +140,12 @@ export default function CompanyPage() {
             </button>
           )}
           <Link
+            href={`/companies/${encodeURIComponent(companyName)}/charts`}
+            className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            📊 Charts
+          </Link>
+          <Link
             href="/"
             className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
           >
@@ -159,7 +177,14 @@ export default function CompanyPage() {
                   <span className={isSelected ? "text-green-500 font-bold" : "text-gray-300"}>
                     {isSelected ? "✓" : "—"}
                   </span>
-                  <span className={isSelected ? "font-medium" : ""}>{label}</span>
+                  {pdfUrls[label] ? (
+                    <a href={pdfUrls[label]} target="_blank" rel="noopener noreferrer"
+                      className={`hover:underline ${isSelected ? "font-medium" : ""}`}>
+                      {label} ↗
+                    </a>
+                  ) : (
+                    <span className={isSelected ? "font-medium" : ""}>{label}</span>
+                  )}
                   {isSelected && (
                     <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded">used</span>
                   )}

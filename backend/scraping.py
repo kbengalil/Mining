@@ -1,4 +1,3 @@
-import json
 import os
 import re
 from datetime import datetime, timedelta
@@ -22,7 +21,20 @@ COMPANIES = {
             "/about/management/",
         ],
         "news_page": "/news/",
-    }
+    },
+    "Osisko Development Corp.": {
+        "base_url": "https://osiskodev.com",
+        "investor_pages": [
+            "/investors/",
+            "/investors/presentations/",
+            "/investors/financials/",
+            "/investors/reports/",
+        ],
+        "about_pages": [
+            "/about/team/",
+        ],
+        "news_page": "/investors/news/",
+    },
 }
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -43,80 +55,153 @@ def identify_company_from_url(url: str) -> str | None:
     return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
-def discover_company(company_name: str, base_url: str | None = None) -> dict | None:
-    """Find a mining company's investor page paths.
+_INVESTOR_KEYWORDS = {"investor", "invest", "presentation", "financial", "report", "annual", "agm", "news", "media", "press", "document", "filing", "disclosure"}
+_ABOUT_KEYWORDS = {"team", "management", "leadership", "about", "people", "executive", "board"}
 
-    If base_url is provided, skips Google Search and asks Gemini to find
-    the sub-page paths on the known domain. Otherwise uses Google Search
-    grounding to find the domain first.
+
+def _crawl_for_pdfs(start_url: str) -> dict:
     """
-    key = os.environ["GEMINI_API_KEY"]
+    Crawl a company website starting from start_url.
+    Visit the start page, find internal links that look like investor/about/news sub-pages,
+    visit each one, and collect all PDF links found. Returns a config dict.
+    """
+    from urllib.parse import urlparse
 
+    parsed = urlparse(start_url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    domain = parsed.netloc
+
+    def get_html(url):
+        # Try simple requests first (fast); fall back to Playwright only if content looks JS-rendered
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15, verify=False)
+            r.raise_for_status()
+            html = r.text
+            # If the page has almost no content it's likely JS-rendered — try Playwright
+            if html.count("<a ") < 5:
+                return _get_page_html(url)
+            return html
+        except Exception:
+            try:
+                return _get_page_html(url)
+            except Exception:
+                return ""
+
+    def extract_internal_links(html, current_url):
+        soup = BeautifulSoup(html, "html.parser")
+        links = {}
+        for a in soup.find_all("a", href=True):
+            href = urljoin(current_url, a["href"]).split("?")[0].split("#")[0].rstrip("/")
+            text = a.get_text(strip=True).lower()
+            if domain not in href:
+                continue
+            path = href.replace(base_url, "") or "/"
+            if path and path != "/":
+                links[path] = text
+        return links
+
+    def extract_pdfs(html, page_url):
+        soup = BeautifulSoup(html, "html.parser")
+        pdfs = {}
+        for a in soup.find_all("a", href=True):
+            href = urljoin(page_url, a["href"])
+            if ".pdf" in href.lower():
+                label = a.get_text(strip=True) or href.split("/")[-1].split("?")[0]
+                pdfs[label] = href
+        return pdfs
+
+    # Step 1: load the start page
+    print(f"Crawling {start_url}...")
+    start_html = get_html(start_url)
+    all_links = extract_internal_links(start_html, start_url)
+
+    def _is_section_page(path: str) -> bool:
+        # Section index pages have short paths (≤3 segments), e.g. /investors/ or /investors/presentations/
+        # Article pages have long slugs like /news/equinox-gold-reports-176836-ounces-...
+        segments = [s for s in path.strip("/").split("/") if s]
+        if len(segments) > 3:
+            return False
+        # Skip paths where the last segment looks like a long article slug (>40 chars)
+        if segments and len(segments[-1]) > 40:
+            return False
+        return True
+
+    # Step 2: categorize links
+    investor_paths, about_paths, news_path = [], [], None
+    for path, text in all_links.items():
+        if not _is_section_page(path):
+            continue
+        combined = (path + " " + text).lower()
+        if any(kw in combined for kw in _INVESTOR_KEYWORDS):
+            investor_paths.append(path)
+        if any(kw in combined for kw in _ABOUT_KEYWORDS):
+            about_paths.append(path)
+        if not news_path and any(kw in combined for kw in {"news", "press", "release", "media"}):
+            news_path = path
+
+    # Step 3: BFS crawl — visit investor section pages up to 2 levels deep
+    # Queue starts with pages found on the homepage that look like investor sections
+    visited = {start_url}
+    queue = [p for p in dict.fromkeys(investor_paths) if ".pdf" not in p.lower()]
+    all_investor_paths = []
+    depth = {p: 0 for p in queue}
+
+    while queue and len(all_investor_paths) < 20:
+        path = queue.pop(0)
+        url = base_url + path
+        if url in visited:
+            continue
+        visited.add(url)
+        print(f"  Visiting {url}...")
+        html = get_html(url)
+        if not html:
+            continue
+        all_investor_paths.append(path)
+
+        # Only go one level deeper from depth-0 pages
+        if depth.get(path, 0) < 1:
+            sub_links = extract_internal_links(html, url)
+            for sub_path, sub_text in sub_links.items():
+                sub_url = base_url + sub_path
+                if sub_url in visited or ".pdf" in sub_url.lower():
+                    continue
+                if not _is_section_page(sub_path):
+                    continue
+                combined = (sub_path + " " + sub_text).lower()
+                if any(kw in combined for kw in _INVESTOR_KEYWORDS):
+                    if sub_path not in depth:
+                        depth[sub_path] = depth.get(path, 0) + 1
+                        queue.append(sub_path)
+
+    return {
+        "base_url": base_url,
+        "investor_pages": list(dict.fromkeys(all_investor_paths)) or investor_paths,
+        "about_pages": list(dict.fromkeys(about_paths))[:3],
+        "news_page": news_path or "/news/",
+    }
+
+
+def discover_company(company_name: str, base_url: str | None = None) -> dict | None:
+    """Discover a company's investor pages by actually crawling the website."""
     if base_url:
-        # User provided the URL — just find the sub-pages on that domain
-        base_url = base_url.rstrip("/")
-        prompt = f"""The mining company "{company_name}" has its website at {base_url}.
+        return _crawl_for_pdfs(base_url)
 
-Find the correct paths on this website for:
-- investor_pages: pages that contain PDF documents (Annual Information Form, Management Information Circular, corporate presentations, financial statements)
-- about_pages: management team or leadership page
-- news_page: press releases or news page
-
-Return ONLY a JSON object:
-{{
-  "base_url": "{base_url}",
-  "investor_pages": ["/investors/", "/investors/reports/"],
-  "about_pages": ["/about/team/"],
-  "news_page": "/news/"
-}}
-
-Rules:
-- All paths must start with /
-- Return ONLY valid JSON, no explanation"""
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        }
-    else:
-        prompt = f"""Find the official investor relations website for the publicly traded mining company "{company_name}".
-
-Return ONLY a JSON object with these fields:
-{{
-  "base_url": "https://www.example.com",
-  "investor_pages": ["/investors/", "/investors/reports/"],
-  "about_pages": ["/about/team/"],
-  "news_page": "/news/"
-}}
-
-Rules:
-- base_url must be the company's official domain (no trailing slash)
-- investor_pages: pages that contain links to PDF documents like Annual Information Form, Management Information Circular, corporate presentations, financial statements
-- about_pages: management team or leadership page
-- news_page: press releases or news page
-- All paths must start with /
-- Return ONLY valid JSON, no explanation"""
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "tools": [{"google_search": {}}],
-        }
-
+    # No URL provided — use Gemini with Google Search to find the domain first
+    key = os.environ["GEMINI_API_KEY"]
+    prompt = f'What is the official investor relations URL for the publicly traded mining company "{company_name}"? Return ONLY the URL, nothing else.'
     resp = requests.post(
         GEMINI_URL,
         headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-        json=payload,
+        json={"contents": [{"role": "user", "parts": [{"text": prompt}]}], "tools": [{"google_search": {}}]},
         timeout=60,
     )
     if not resp.ok:
-        print(f"discover_company failed: {resp.status_code} {resp.text[:200]}")
         return None
-    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
+    found_url = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    url_match = re.search(r"https?://[^\s]+", found_url)
+    if not url_match:
         return None
-    try:
-        return json.loads(match.group())
-    except Exception as e:
-        print(f"discover_company JSON parse error: {e}")
-        return None
+    return _crawl_for_pdfs(url_match.group(0))
 
 
 def _get_page_html(url: str) -> str:
@@ -162,6 +247,8 @@ def find_pdf_links(company_name: str, dynamic_companies: dict | None = None) -> 
     page_errors = []
 
     for page_path in company["investor_pages"]:
+        if ".pdf" in page_path.lower():
+            continue
         url = base_url + page_path
         try:
             html = _get_page_html(url)

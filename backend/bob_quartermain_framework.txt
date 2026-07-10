@@ -1,0 +1,133 @@
+## Bob Quartermain — Builder's Framework for Junior Mining Investment
+
+Bob Quartermain is a professional geologist and mine builder with nearly 50 years of experience. He helped discover a major gold camp in Ontario as a young geologist, built a silver producer into a major company, founded and built one of Canada's largest gold mines from a geological concept, and sold it to a major for over $3 billion. He has since returned to discovery-stage work in North America.
+
+Source: Kitco News interview at the Rule Symposium on Natural Resource Investing, 2026.
+
+---
+
+### 1. Why large mining companies consistently miss the biggest discoveries
+
+When metal prices are low, major mining companies cut exploration teams to reduce costs. This creates a vacuum that junior companies fill. Junior teams — often formed by ex-mining professionals — can make decisions quickly, pivot when results disappoint, and deploy capital efficiently without corporate bureaucracy.
+
+"If you're a large company, you've got a bureaucracy that you have to look through, decisions have to be made. Whereas if you're a small group, we could make decisions really quickly. We're not getting the results we think we need — we would pivot and turn to another opportunity."
+
+Majors also tend to underweight assets that are small relative to their portfolio. A mine producing 150,000 oz/year is irrelevant to a producer doing 4–5 million oz/year. It receives no capital, no exploration attention, and gets sold when the price is wrong. The undercapitalized, under-explored asset then becomes a junior opportunity.
+
+Application: assets spun out of or sold by majors because they are "too small" deserve special attention. The asset was neglected, not uneconomic.
+
+---
+
+### 2. The M&A cycle: mid-tier growth leads to junior acquisitions
+
+M&A activity follows a pattern:
+1. Majors consolidate among themselves — while digesting, they are distracted and not acquiring juniors
+2. Mid-tier companies grow in market cap and production through their own consolidation
+3. Mid-tiers begin acquiring juniors to build their project pipelines
+4. Majors eventually re-enter junior M&A as they need to replace depleted reserves
+
+"As you get these companies which have two or three mines now becoming eight and ten mines, then we're going to continue to see portfolios move up."
+
+The current environment favors junior M&A because: (a) margins are healthy at current gold prices, (b) companies are returning cash to shareholders via dividends and buybacks — showing discipline that attracts institutional investors, and (c) juniors are still not getting institutional attention, creating a valuation gap.
+
+Application: the timing of a junior's potential acquisition depends on where acquiring companies are in their own growth cycle, not just on the quality of the project.
+
+---
+
+### 3. Gold supply is structurally constrained
+
+Exploration budgets have been starved for approximately 15 years. The consequences are compounding:
+
+- Deposits are harder to find: they are deeper and lower grade
+- Average mine grade has declined from roughly 10 g/t (historical open-pit) to around 1 g/t today
+- Major discoveries at depth cost hundreds of millions of dollars to find
+- As gold production costs continue rising, a higher sustained gold price is required just to maintain current production levels
+
+"Finding those large mines is going to be much more challenging. Lower grade means costs go up. The price has to go up because input costs are going to continue to go up."
+
+Application: the supply constraint is a long-duration structural tailwind for gold prices, not a cyclical one. Junior developers with fully permitted, feasibility-stage projects in safe jurisdictions are positioned in the part of the value chain where the supply gap is most acute.
+
+---
+
+### 4. Jurisdiction risk: governments change the rules
+
+Mining assets are located where they are found, not where investors would prefer them. As governments seek new revenue sources, mining operations in jurisdictions with weaker rule of law face increasing risk of:
+- Changes to taxation or royalty regimes
+- Retroactive renegotiation of agreements
+- Regulatory changes that impair project economics after capital has been committed
+
+"To what extent will governments, as they look for revenue sources, look at perhaps additional taxation? That's one of the challenges going forward — mines are located where we find them."
+
+North American jurisdictions (Canada, USA) offer rule of law, established permitting processes, and political stability. This reduces the risk that project economics will be altered after the feasibility stage.
+
+Application: when assessing a developer, jurisdiction risk compounds with project risk. A world-class deposit in a high-risk jurisdiction may be inferior to a good deposit in a Tier 1 jurisdiction once political risk is discounted.
+
+---
+
+### 5. How to identify a genuine world-class deposit
+
+Key signals that a project has the potential to become a mine, not just a good story:
+
+1. **Geology quality**: does the deposit style match known producing mines? Is the grade consistent, not cherry-picked? Are intercepts wide enough to be mineable?
+2. **Drill spacing**: enough holes to form an informed view of resource continuity, not just isolated high-grade hits
+3. **Open at depth or along strike**: remaining exploration upside after the known resource is a positive sign for long-term mine life
+4. **The team's track record**: a geologist or executive who has built a mine before knows what a mine looks like when it's in the ground
+5. **Conviction under pressure**: world-class projects often face skepticism at an early stage. Management teams that stand behind the geology when the market disagrees tend to be proven right over time
+
+"I can look at the geology, look at the drill results and formulate an opinion that will help me make a decision. But buying people — you want to make sure you've got a good geological team with an understanding of the geology."
+
+---
+
+### 6. Silver: industrial demand from AI and data centers
+
+Silver's investment case has traditionally rested on monetary demand (monetary history, store of value) and solar panel demand. A third demand driver is emerging: data centers and AI infrastructure.
+
+A single acre of data center requires 3–400 tonnes of copper. Silver, as the best electrical conductor, is embedded throughout server platforms — in the servers themselves and in all connecting components. Hundreds of kilograms of silver can be in a single large data center.
+
+"An acre of data centers is lots of concrete, lots of steel, but it's 3 to 400 tons of copper, right? And powering that, silver being the best electrical conductor, is all through the server platform."
+
+Only approximately 30% of silver production comes from primary silver mines. The majority is a by-product of base metal and gold mining, meaning silver supply cannot respond quickly to price increases. Combined with ongoing industrial deficit conditions, this creates a supply/demand dynamic that supports higher prices over time.
+
+Application: silver producers and developers benefit from multiple demand vectors: monetary, solar, and now AI/data center infrastructure. Supply is inelastic and deficit conditions are persistent.
+
+---
+
+### 7. Build vs. sell: always act in shareholders' best interest
+
+The decision to sell a company is not about pride or the desire to keep building — it is about what delivers the most value to shareholders. When a larger company offers a meaningful premium to take an asset into their portfolio, the right answer is often to accept.
+
+"I learned from Rick Rule many years ago: you're here to do what's in the best interest of shareholders. If someone is able to come in and say we're willing to give your shareholders a premium, then it's something we have to look at."
+
+Conversely, if no acquirer appears at an appropriate price, the builder must keep developing the asset — derisk it further, demonstrate production, and wait for the right buyer at the right time.
+
+Application: management teams that talk about selling only "at the right price" and show no ego attachment to remaining independent are better aligned with shareholders than those who pursue empire-building at shareholder expense.
+
+---
+
+### 8. Capital discipline separates this cycle from previous booms
+
+In previous cycles (early 2000s, 2011), junior and mid-tier companies over-expanded, took on debt, and diluted shareholders aggressively chasing growth. When prices corrected, many were forced into rollbacks or bankruptcy.
+
+The current cycle shows more discipline:
+- Companies are focused on efficient use of capital raised
+- Raising money is tied to specific milestones (drilling, engineering studies) not speculative exploration
+- Free cash flow is being returned to shareholders via dividends and buybacks, which is unprecedented in recent junior mining history
+- Social media allows companies to communicate directly with shareholders, improving accountability
+
+"There's better deployment of shareholder assets — capital into continuing to grow resources. We look and say, what is it we're doing with the money we've raised in order to enhance shareholder value?"
+
+Application: when evaluating a junior, ask whether their capital raises have a clear stated purpose and whether results from prior raises were delivered. Discipline in capital deployment is as important as the quality of the deposit.
+
+---
+
+### 9. Advice for evaluating young geologists and early-stage teams
+
+The best junior mining investments are often in companies where:
+- The lead geologist has personal experience underground or in mine development, not just exploration
+- The team has seen what a real mine looks like in the ground, giving them a calibration most exploration-stage teams lack
+- Management is willing to take risk and back their convictions despite external skepticism
+- The team is young, hungry, and focused — not running a portfolio of legacy positions
+
+"Focus on good geology and be willing to take risk. When you have a good project, stick with your convictions."
+
+The combination of experienced geological judgment and a focused, motivated team is more predictive of success than any single technical metric.

@@ -84,10 +84,13 @@ def _call_gemini(history: list) -> str:
         )
         if response.ok:
             break
-        if response.status_code == 429 and attempt < 2:
-            wait = 20 * (attempt + 1)
-            print(f"Gemini 429 rate limit (attempt {attempt+1}/3), waiting {wait}s...")
-            time.sleep(wait)
+        if response.status_code == 429:
+            if attempt < 2:
+                wait = 20 * (attempt + 1)
+                print(f"Gemini 429 rate limit (attempt {attempt+1}/3), waiting {wait}s...")
+                time.sleep(wait)
+            else:
+                raise RuntimeError("Gemini API quota exceeded. Please try again later or check your billing quota.")
         else:
             response.raise_for_status()
     return response.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -105,7 +108,7 @@ RECENT NEWS (newest first):
 COMPANY DOCUMENTS:
 {doc_texts}
 
-Write EXACTLY these 9 sections with markdown headers. Be concise and factual.
+Write EXACTLY these 11 sections with markdown headers. Be concise and factual.
 
 ## Recent Developments
 Summarize the most significant news from the last 6 months. Focus on material events: permits, agreements, financings, drill results, project milestones. 3-5 bullet points. Note the date for each item.
@@ -126,15 +129,25 @@ From the Management Information Circular (proxy document):
 - CEO total annual compensation, broken down into each component: Base Salary, Annual Bonus, Share-Based Awards (RSUs/PSUs), Option-Based Awards, Pension Value, Any Other Compensation, and Total.
 - If any component is nil or not applicable, state nil.
 - If the Management Information Circular is not among the provided documents, write "Management Information Circular not provided — figures not available."
+Also check presentations and fact sheets for major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail (e.g. converted debt to equity, long-term holder, founding investor).
 
 ## Key Project Metrics
 3-5 bullet points per project. Resource size, NPV (note whether pre-tax or after-tax), IRR, capex, mine life. Only include figures from the documents.
+For each project also note if disclosed: exploration upside (strike length drilled vs. total strike length, % of trend tested, new zones discovered).
+Include growth projects from any announced mergers or acquisitions — label them clearly as "(from pending acquisition of [company])".
 
 ## Financials
 3-5 bullet points. Cash position, shares outstanding, burn rate, recent financing activity.
+Also include if disclosed in any document: projected annual cash flow or net cash flow at current metal prices, pro forma balance sheet figures from merger or transaction documents, and any stated annual exploration or capital spending budget.
 
 ## Jurisdiction
 3-5 bullet points. Country/region of main projects, any sovereign risk factors mentioned in the documents.
+
+## Valuation vs Peers
+If the documents include any peer group comparison: state the company's P/NAV (or EV/NAV or P/CF), the peer group median for the same metric, and the implied discount or premium. List the peer companies named. If no peer comparison is in the documents, write "Not disclosed."
+
+## Strategic Outlook
+Summarize explicit management statements from any document on: future M&A appetite (e.g. "no further acquisitions planned"), annual exploration or capital spending targets ($X/year), production growth timeline and targets, dividend or buyback policy, and any other stated priorities. Quote figures directly where available. If not disclosed, write "Not disclosed."
 
 ## Red Flags
 Work through EVERY item in the checklist below. For each one that applies, write a bullet with the specific factual observation. Then add any additional red flags you identify beyond this list.
@@ -155,6 +168,8 @@ Dilution:
 - Has the company completed private placements or public offerings in the last 3 years? List dates and amounts.
 - Is the total share count growing year over year?
 - Are there warrants or stock options outstanding that would further dilute shareholders?
+- Were recent financings done with warrant coverage? State the warrant ratio (e.g. half-warrant, full warrant) and strike price for each. A financing done with full warrant coverage at a deep discount to market is a red flag — it signals weak demand and hands investors cheap optionality at existing shareholders' expense.
+- Has the company raised money when its stock was near multi-year lows with heavy warrant coverage? Repeated distress financings ruin the capital structure and trap the stock.
 
 Legal & Environmental:
 - Any indigenous rights disputes, permit challenges, or court proceedings? State current status if known.
@@ -174,6 +189,9 @@ Jurisdiction:
 
 Management:
 - Any evidence of insider selling in the documents? (Insider buying is positive; omit if no data.)
+- Is the total CEO/NEO compensation high relative to the company's stage? For a pre-revenue junior with no commercial production, a CEO base salary above $500K is a potential alignment concern. State the actual figures from the MIC.
+- Are key decision-makers (chairman, CEO) receiving salary AND options AND share-based awards simultaneously while the company has not yet produced metal? Flag if total package appears disproportionate to company progress.
+- Do any directors or officers hold their position without owning a meaningful stake in the company? Low or zero insider ownership at the board level is a misalignment signal.
 
 Business Stage:
 - Has the company ever produced metal commercially? If not, state this explicitly.
@@ -188,15 +206,53 @@ RULES:
 - Do not invent data. If something is not in the documents or website, write "Not disclosed."
 - No investment advice. No buy/sell/hold language. No verdicts or opinions.
 - Red flags are factual observations, not judgments.
-- Plain English, short sentences."""
+- Plain English, short sentences.
+- When two documents conflict on the same fact, always use the MORE RECENT document. If the conflict is material (e.g. a legal dispute shown as unresolved in an older doc but resolved in a newer one), note both versions and cite the dates."""
 
 
 def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
-    """Keep only the most recent AIF and most recent MIC; skip older ones and ESTMA."""
     import re
-    aif_pattern = re.compile(r"Annual Information Form.*?(\d{4})", re.IGNORECASE)
-    mic_pattern = re.compile(r"(Management Information Circular|Information Circular).*?(\d{4})", re.IGNORECASE)
-    skip_patterns = [re.compile(r"ESTMA", re.IGNORECASE)]
+    from datetime import date, timedelta
+
+    # Labels to drop unconditionally (case-insensitive exact match)
+    SKIP_EXACT = {
+        "learn more", "articles", "english", "spanish", "englis", "slides",
+        "transcript", "presentation", "fact sheet", "press release",
+        "management approach", "sustainability management approach",
+        "report on the implementation of the responsible gold mining principles",
+        "report on the implementation of the conflict-free gold standard",
+    }
+
+    # Labels to drop if the pattern appears anywhere in the label
+    SKIP_RE = [
+        re.compile(r"\bestma\b", re.IGNORECASE),
+        re.compile(r"test[_\-]?pdf", re.IGNORECASE),
+        re.compile(r"forced labour", re.IGNORECASE),
+        re.compile(r"voluntary carbon", re.IGNORECASE),
+        re.compile(r"supply chain", re.IGNORECASE),
+    ]
+
+    AIF_RE = re.compile(r"annual information form.*?(\d{4})", re.IGNORECASE)
+    MIC_RE = re.compile(r"(management information circular|information circular).*?(\d{4})", re.IGNORECASE)
+
+    # Press release: label starts with "Month D(D), YYYY"
+    _MONTH_MAP = {m: i + 1 for i, m in enumerate(
+        "january february march april may june july august september october november december".split()
+    )}
+    PR_RE = re.compile(
+        r"^(january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"\s+(\d{1,2}),\s+(\d{4})\b",
+        re.IGNORECASE,
+    )
+
+    # Dated ESG/Sustainability docs: "2021 ESG Report", "2022 Sustainability Report", etc.
+    DATED_ESG_RE = re.compile(
+        r"^(20\d{2})\s+.*(esg|sustainability|climate|water|tailings)",
+        re.IGNORECASE,
+    )
+
+    today = date.today()
+    six_months_ago = today - timedelta(days=183)
 
     def best_by_year(pattern, group):
         best_year, best_key = -1, None
@@ -207,22 +263,63 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
                 best_key = label
         return best_key
 
-    best_aif = best_by_year(aif_pattern, 1)
-    best_mic = best_by_year(mic_pattern, 2)
+    best_aif = best_by_year(AIF_RE, 1)
+    best_mic = best_by_year(MIC_RE, 2)
 
-    filtered = {}
+    press_releases = []  # (date, label, url)
+    regular = {}
+
     for label, url in pdf_docs.items():
-        if any(p.search(label) for p in skip_patterns):
+        s = label.strip()
+
+        if len(s) < 4:
             continue
-        if aif_pattern.search(label):
-            if label == best_aif:
-                filtered[label] = url
-        elif mic_pattern.search(label):
-            if label == best_mic:
-                filtered[label] = url
-        else:
-            filtered[label] = url
-    return filtered
+        if s.lower() in SKIP_EXACT:
+            continue
+        if any(p.search(s) for p in SKIP_RE):
+            continue
+
+        # AIF: keep only most recent
+        if AIF_RE.search(s):
+            if s == best_aif:
+                regular[s] = url
+            continue
+
+        # MIC: keep only most recent
+        if MIC_RE.search(s):
+            if s == best_mic:
+                regular[s] = url
+            continue
+
+        # Press release: collect for date-based filtering below
+        m = PR_RE.match(s)
+        if m:
+            month_num = _MONTH_MAP[m.group(1).lower()]
+            try:
+                pr_date = date(int(m.group(3)), month_num, int(m.group(2)))
+                press_releases.append((pr_date, s, url))
+            except ValueError:
+                pass
+            continue
+
+        # Dated ESG docs: skip if older than 2 years
+        m_esg = DATED_ESG_RE.match(s)
+        if m_esg:
+            if int(m_esg.group(1)) >= today.year - 2:
+                regular[s] = url
+            continue
+
+        regular[s] = url
+
+    # Press releases: keep last 6 months; if fewer than 5, take the 5 most recent
+    press_releases.sort(key=lambda x: x[0], reverse=True)
+    recent_prs = [(lbl, url) for d, lbl, url in press_releases if d >= six_months_ago]
+    if len(recent_prs) < 5:
+        recent_prs = [(lbl, url) for _, lbl, url in press_releases[:5]]
+    for lbl, url in recent_prs:
+        regular[lbl] = url
+
+    return regular
 
 
 def detect_company_intent(message: str) -> str | None:
@@ -317,8 +414,9 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
     if on_progress:
         on_progress({"step": "rag", "label": "Searching expert knowledge base...", "current": 1, "total": 1})
     rag_chunks = _search_rag(
-        "mining company NPV IRR capex management quality jurisdiction risk red flags investment analysis",
-        match_count=8,
+        "mining company NPV IRR capex management quality jurisdiction risk red flags investment analysis "
+        "insider ownership compensation alignment warrant financing dilution capital structure M&A",
+        match_count=10,
     )
     rag_context = ""
     if rag_chunks:

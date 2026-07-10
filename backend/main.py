@@ -1,3 +1,4 @@
+import base64
 import io
 import os
 import re
@@ -5,6 +6,8 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+import requests as http
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -15,6 +18,8 @@ from pydantic import BaseModel
 from supabase import create_client
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 from agent import generate_overview, send_message, send_message_with_overview, _filter_docs, detect_company_intent  # noqa: E402
 from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename, discover_company, identify_company_from_url
@@ -143,13 +148,29 @@ def _save_overview(company_name: str, overview_md: str, current_urls: list[str])
         }).execute()
 
 
-def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_urls: list[str]):
+def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_urls: list[str], crawl_url: str | None = None):
     job = overview_jobs[job_id]
 
     def on_progress(info: dict):
         job.update(info)
 
     try:
+        if crawl_url:
+            job["label"] = "Crawling investor pages..."
+            discovered = discover_company(company_name, base_url=crawl_url)
+            if discovered:
+                dynamic_companies[company_name] = discovered
+                result = find_pdf_links(company_name, dynamic_companies)
+                pdf_docs = result["documents"]
+                current_urls = sorted(pdf_docs.values())
+                job["pdfs"] = list(pdf_docs.keys())
+                job["pdf_urls"] = dict(pdf_docs)
+                job["total"] = len(pdf_docs)
+            else:
+                job["status"] = "error"
+                job["error"] = "Could not find investor documents for this company."
+                return
+
         overview_md = generate_overview(company_name, pdf_docs, on_progress, dynamic_companies)
         _save_overview(company_name, overview_md, current_urls)
         job["status"] = "done"
@@ -188,9 +209,33 @@ def start_overview(company_name: str, background_tasks: BackgroundTasks, force: 
         "current": 0,
         "total": len(pdf_docs),
         "pdfs": pdf_list,
+        "pdf_urls": pdf_docs,
     }
     background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls)
     return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": selected_pdfs, "cached": False}
+
+
+@app.delete("/companies/{company_name}/overview")
+def delete_overview(company_name: str):
+    supabase.table("company_overviews").delete().eq("company_name", company_name).execute()
+    return {"deleted": company_name}
+
+
+@app.post("/companies/{company_name}/overview/archive")
+def archive_overview(company_name: str):
+    row = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="No report found to archive")
+    existing = row.data[0]
+    archived_name = f"_{company_name} [archived]"
+    supabase.table("company_overviews").delete().eq("company_name", archived_name).execute()
+    supabase.table("company_overviews").insert({
+        "company_name": archived_name,
+        "overview_markdown": existing["overview_markdown"],
+        "source_urls": existing["source_urls"],
+        "generated_at": existing["generated_at"],
+    }).execute()
+    return {"archived_as": archived_name}
 
 
 @app.get("/overview-jobs/{job_id}")
@@ -225,9 +270,18 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
 
     if company_name:
 
-        # Check cache first — answer from existing report if available
-        cached_row = supabase.table("company_overviews").select("overview_markdown, generated_at").eq("company_name", company_name).limit(1).execute()
-        if cached_row.data:
+        # Check cache by exact name first, then fall back to domain match if a URL was provided
+        cached_data = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute().data
+        if not cached_data and provided_url:
+            domain = re.sub(r"https?://(?:www\.)?", "", provided_url).split("/")[0]
+            all_rows = supabase.table("company_overviews").select("*").not_.like("company_name", "_%").execute().data or []
+            for row in all_rows:
+                if any(domain in u for u in (row.get("source_urls") or [])):
+                    cached_data = [row]
+                    company_name = row["company_name"]
+                    break
+
+        if cached_data:
             overview_md = cached_row.data[0]["overview_markdown"]
             generated_at = cached_row.data[0]["generated_at"][:10]  # date only
             reply, session_id = send_message_with_overview(payload.message, overview_md, company_name, payload.session_id)
@@ -243,28 +297,33 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
 
         all_companies = {**COMPANIES, **dynamic_companies}
         if company_name not in all_companies:
-            discovered = discover_company(company_name, base_url=provided_url)
-            if discovered:
-                dynamic_companies[company_name] = discovered
-                all_companies = {**COMPANIES, **dynamic_companies}
-            else:
-                reply = f"I couldn't find investor information for **{company_name}**. Please check the company name and try again."
+            if not provided_url:
+                reply = f"I couldn't find investor information for **{company_name}**. Please paste the company's investor relations URL."
                 return {"reply": reply, "session_id": payload.session_id}
+            # Register a placeholder so the job can start immediately
+            dynamic_companies[company_name] = {"base_url": provided_url.rstrip("/"), "investor_pages": [], "about_pages": [], "news_page": "/news/"}
+            all_companies = {**COMPANIES, **dynamic_companies}
 
-        # No cache — start overview job in background
+        # No cache — start overview job in background (crawl happens inside the job)
         company_info = all_companies[company_name]
-        base_url = company_info.get("base_url", "")
-        result = find_pdf_links(company_name, dynamic_companies)
-        pdf_docs = result["documents"]
-        current_urls = sorted(pdf_docs.values())
-        selected_pdfs = list(_filter_docs(pdf_docs).keys())
+        base_url = company_info.get("base_url", provided_url or "")
+        needs_crawl = not company_info.get("investor_pages") and provided_url
+        if needs_crawl:
+            pdf_docs = {}
+            current_urls = []
+            selected_pdfs = []
+        else:
+            result = find_pdf_links(company_name, dynamic_companies)
+            pdf_docs = result["documents"]
+            current_urls = sorted(pdf_docs.values())
+            selected_pdfs = list(_filter_docs(pdf_docs).keys())
         job_id = str(uuid.uuid4())
         overview_jobs[job_id] = {
             "status": "running", "step": "reading", "label": "Starting...",
             "current": 0, "total": len(pdf_docs), "pdfs": list(pdf_docs.keys()),
-            "selected_pdfs": selected_pdfs,
+            "selected_pdfs": selected_pdfs, "pdf_urls": dict(pdf_docs),
         }
-        background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls)
+        background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, provided_url if needs_crawl else None)
         encoded = company_name.replace(" ", "%20")
         reply = (
             f"Starting analysis of **{company_name}**. "
@@ -277,6 +336,98 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
 
     reply, session_id = send_message(payload.message, payload.documents, payload.session_id)
     return {"reply": reply, "session_id": session_id}
+
+
+chart_jobs: dict[str, dict] = {}
+chart_cache: dict[str, list] = {}  # company_name → extracted chart list
+
+
+def _is_pie_or_bar_chart(img_bytes: bytes) -> bool:
+    """Ask Gemini vision whether a page image contains a pie or bar chart."""
+    key = os.environ["GEMINI_API_KEY"]
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(img_bytes).decode()}},
+                {"text": "Does this page contain a pie chart or bar chart? Answer only 'yes' or 'no'."},
+            ],
+        }]
+    }
+    try:
+        resp = http.post(
+            GEMINI_URL,
+            headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+            json=payload,
+            timeout=30,
+        )
+        if not resp.ok:
+            return False
+        answer = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip().lower()
+        return answer.startswith("yes")
+    except Exception:
+        return False
+
+
+def run_chart_job(job_id: str, company_name: str, source_urls: list):
+    import fitz
+
+    # Only scan presentation-like PDFs — filter by path OR filename keywords
+    _PRES_KEYWORDS = ("presentation", "deck", "corporate", "investor", "conference", "fact-sheet", "factsheet", "merger")
+    def _is_presentation(url: str) -> bool:
+        lower = url.lower()
+        return "/presentations/" in lower or any(kw in lower for kw in _PRES_KEYWORDS)
+    presentation_urls = [u for u in source_urls if _is_presentation(u)]
+
+    job = chart_jobs[job_id]
+    charts = []
+    job["total"] = len(presentation_urls)
+
+    for i, url in enumerate(presentation_urls):
+        raw_name = url.split("/")[-1].split("?")[0].replace(".pdf", "")
+        job["current"] = i + 1
+        job["label"] = raw_name
+        try:
+            pdf_bytes = fetch_pdf_bytes(url)
+            fitz_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            for page_num in range(len(fitz_doc)):
+                pix = fitz_doc[page_num].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                img_bytes = pix.tobytes("png")
+                if _is_pie_or_bar_chart(img_bytes):
+                    charts.append({
+                        "document": raw_name,
+                        "page": page_num + 1,
+                        "image": base64.b64encode(img_bytes).decode(),
+                    })
+            fitz_doc.close()
+        except Exception as e:
+            print(f"Chart extraction error for {url}: {e}")
+
+    chart_cache[company_name] = charts
+    job["status"] = "done"
+    job["charts"] = charts
+
+
+@app.post("/companies/{company_name}/charts/start")
+def start_chart_extraction(company_name: str, background_tasks: BackgroundTasks):
+    if company_name in chart_cache:
+        return {"cached": True, "charts": chart_cache[company_name]}
+    row = supabase.table("company_overviews").select("source_urls").eq("company_name", company_name).limit(1).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="No report found for this company")
+    job_id = str(uuid.uuid4())
+    chart_jobs[job_id] = {"status": "running", "current": 0, "total": 0, "label": "Starting..."}
+    unique_urls = list(dict.fromkeys(row.data[0]["source_urls"]))
+    background_tasks.add_task(run_chart_job, job_id, company_name, unique_urls)
+    return {"cached": False, "job_id": job_id}
+
+
+@app.get("/companies/{company_name}/charts/jobs/{job_id}")
+def get_chart_job(job_id: str):
+    job = chart_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parent / "static", html=True), name="static")
