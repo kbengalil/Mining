@@ -39,6 +39,7 @@ export default function CompanyPage() {
   const pollRef = useRef(null);
   const timerRef = useRef(null);
   const startTimeRef = useRef(null);
+  const jobIdRef = useRef(null);
 
   useEffect(() => {
     if (companyName) document.title = `${companyName} — Mining AI Analyst`;
@@ -49,6 +50,7 @@ export default function CompanyPage() {
 
     if (existingJobId) {
       // Job already started from chat — poll it directly
+      jobIdRef.current = existingJobId;
       setStatus("running");
       startTimeRef.current = Date.now();
       timerRef.current = setInterval(() => {
@@ -70,6 +72,7 @@ export default function CompanyPage() {
               });
               setPdfUrls(map);
               setPdfs(Object.keys(map));
+              setSelectedPdfs(Object.keys(map));
             }
             setStatus("cached");
           } else {
@@ -89,6 +92,7 @@ export default function CompanyPage() {
         setPdfs(data.pdfs || []);
         setSelectedPdfs(data.selected_pdfs || []);
         if (data.pdf_urls) setPdfUrls(data.pdf_urls);
+        jobIdRef.current = data.job_id;
         setStatus("running");
         startTimeRef.current = Date.now();
         timerRef.current = setInterval(() => {
@@ -119,6 +123,11 @@ export default function CompanyPage() {
           clearInterval(timerRef.current);
           setError(data.error);
           setStatus("error");
+        } else if (data.status === "cancelled") {
+          clearInterval(pollRef.current);
+          clearInterval(timerRef.current);
+          setStatus("error");
+          setError("Analysis stopped.");
         }
       })
       .catch(() => {});
@@ -131,6 +140,22 @@ export default function CompanyPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">{companyName}</h1>
         <div className="flex gap-2">
+          {status === "running" && (
+            <button
+              onClick={() => {
+                const id = jobIdRef.current;
+                if (!id) return;
+                fetch(`${API}/overview-jobs/${id}/cancel`, { method: "POST" }).catch(() => {});
+                clearInterval(pollRef.current);
+                clearInterval(timerRef.current);
+                setStatus("error");
+                setError("Analysis stopped.");
+              }}
+              className="text-sm px-4 py-2 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+            >
+              ⏹ Stop
+            </button>
+          )}
           {status === "cached" && (
             <button
               onClick={startAnalysis}

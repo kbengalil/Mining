@@ -204,6 +204,199 @@ def discover_company(company_name: str, base_url: str | None = None) -> dict | N
     return _crawl_for_pdfs(url_match.group(0))
 
 
+def _is_wix_site(html: str) -> bool:
+    """Detect if a page is built on Wix."""
+    markers = ["wixstatic.com", "wix.com/lpviral", "_api/wix", 'content="Wix.com"', "X-Wix-"]
+    return any(m in html for m in markers)
+
+
+def _extract_pdfs_wix(url: str) -> dict:
+    """
+    Wix-specific PDF extraction.
+    Incrementally scrolls to trigger lazy-loading, then uses the browser's
+    Performance resource log to collect every PDF URL the page loaded — more
+    reliable than intercepting responses or parsing <a> tags.
+    """
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            ignore_https_errors=True,
+        )
+        page = ctx.new_page()
+        try:
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(3000)
+
+            # Incremental 600px scroll — triggers Wix section lazy-loading one section at a time
+            scroll_y = 0
+            for _ in range(80):
+                scroll_y += 600
+                page.evaluate(f"window.scrollTo(0, {scroll_y})")
+                page.wait_for_timeout(300)
+                if scroll_y >= page.evaluate("document.body.scrollHeight"):
+                    break
+            page.wait_for_timeout(2000)
+
+            # Click any "Load More" / "View All" buttons
+            for selector in [
+                "button:has-text('Load More')", "button:has-text('Show More')",
+                "a:has-text('Load More')", "button:has-text('View All')",
+            ]:
+                try:
+                    btn = page.query_selector(selector)
+                    if btn and btn.is_visible():
+                        btn.click()
+                        page.wait_for_timeout(2000)
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+
+            html = page.content()
+
+            # Discover hash-section links (Wix uses #section routing to load different content)
+            hash_urls = page.evaluate("""
+                () => {
+                    const seen = new Set();
+                    document.querySelectorAll('a[href]').forEach(a => {
+                        try {
+                            const u = new URL(a.href);
+                            if (u.hash && u.hash.length > 1 && u.pathname === location.pathname)
+                                seen.add(a.href);
+                        } catch {}
+                    });
+                    return [...seen];
+                }
+            """) or []
+
+            all_html = [html]
+            # Navigate to each hash section to load its content
+            for hash_url in hash_urls[:10]:
+                try:
+                    page.goto(hash_url, wait_until="networkidle", timeout=15000)
+                    page.wait_for_timeout(2000)
+                    # Scroll to trigger lazy loading within this section
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(1500)
+                    all_html.append(page.content())
+                except Exception:
+                    pass
+
+            # Performance API: every URL the browser actually fetched across all navigations
+            perf_pdfs = page.evaluate("""
+                () => performance.getEntriesByType('resource')
+                    .map(r => r.name)
+                    .filter(u => u.toLowerCase().includes('.pdf'))
+            """) or []
+
+            # DOM pass on final page state
+            dom_items = page.evaluate("""
+                () => {
+                    const out = [];
+                    document.querySelectorAll('a[href]').forEach(a => {
+                        if (a.href && a.href.toLowerCase().includes('.pdf'))
+                            out.push({url: a.href, text: (a.textContent || '').trim()});
+                    });
+                    ['data-url','data-src','data-href','data-file-url'].forEach(attr => {
+                        document.querySelectorAll('[' + attr + ']').forEach(el => {
+                            const v = el.getAttribute(attr);
+                            if (v && v.toLowerCase().includes('.pdf'))
+                                out.push({url: v, text: (el.textContent || '').trim()});
+                        });
+                    });
+                    return out;
+                }
+            """) or []
+
+            # Navigate back to investor page before clicking buttons
+            # (hash navigation may have left us on a different URL)
+            try:
+                page.goto(url, wait_until="networkidle", timeout=20000)
+                page.wait_for_timeout(2000)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(1500)
+            except Exception:
+                pass
+
+            # Click-through pass: click every "View"/"Read"/"Download" button using
+            # expect_popup() (synchronous, reliable) to capture the PDF URL that Wix
+            # only reveals when the user clicks — page.on("popup") was async/unreliable
+            clicked_pdfs = {}
+
+            for btn_text in ["View", "Read", "Download"]:
+                try:
+                    elements = page.locator(f"text='{btn_text}'").all()
+                    for el in elements[:20]:
+                        try:
+                            if not el.is_visible():
+                                continue
+                            el.scroll_into_view_if_needed()
+                            page.wait_for_timeout(200)
+                            with page.expect_popup(timeout=5000) as popup_info:
+                                el.click()
+                            popup_page = popup_info.value
+                            try:
+                                popup_page.wait_for_load_state("domcontentloaded", timeout=8000)
+                                pu = popup_page.url
+                                if ".pdf" in pu.lower():
+                                    label = pu.split("/")[-1].split("?")[0].replace(".pdf", "") or "Document"
+                                    clicked_pdfs[label] = pu
+                            finally:
+                                popup_page.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            page.wait_for_timeout(1000)
+
+        finally:
+            ctx.close()
+            browser.close()
+
+        html = "\n".join(all_html)
+
+    pdf_links = {}
+
+    # 1. <a href="*.pdf"> from rendered HTML
+    soup = BeautifulSoup(html, "html.parser")
+    for a in soup.find_all("a", href=True):
+        href = urljoin(url, a["href"])
+        if ".pdf" in href.lower():
+            label = a.get_text(strip=True) or href.split("/")[-1].split("?")[0]
+            pdf_links[label] = href
+
+    # 2. Bare PDF URLs in raw HTML source
+    for match in re.findall(r'https://[^\s"\'<>]+\.pdf(?=["\'\s<>]|$)', html):
+        if match not in pdf_links.values():
+            label = match.split("/")[-1].split("?")[0].replace(".pdf", "")
+            pdf_links[label] = match
+
+    # 3. Performance API — PDFs actually fetched by the browser
+    for u in perf_pdfs:
+        if u not in pdf_links.values():
+            label = u.split("/")[-1].split("?")[0].replace(".pdf", "")
+            pdf_links[label] = u
+
+    # 4. DOM data-* attributes
+    for item in dom_items:
+        u = item.get("url", "")
+        if u and u not in pdf_links.values():
+            label = item.get("text") or u.split("/")[-1].split("?")[0].replace(".pdf", "")
+            pdf_links[label] = u
+
+    # 5. Click-through results (PDFs that only appear when "View"/"Read" button is clicked)
+    for label, u in clicked_pdfs.items():
+        if u not in pdf_links.values():
+            pdf_links[label] = u
+
+    print(f"  [Wix] {url} → {len(pdf_links)} PDFs found (click-through: {len(clicked_pdfs)})")
+    return pdf_links
+
+
 def _get_page_html(url: str) -> str:
     """Fetch fully-rendered HTML using Playwright (handles JS-rendered sites)."""
     from playwright.sync_api import sync_playwright
@@ -250,34 +443,13 @@ def find_pdf_links(company_name: str, dynamic_companies: dict | None = None) -> 
         if ".pdf" in page_path.lower():
             continue
         url = base_url + page_path
-        try:
-            html = _get_page_html(url)
-        except Exception as e:
-            # Playwright failed — fall back to simple requests
-            try:
-                response = requests.get(url, headers=HEADERS, timeout=20, verify=False)
-                response.raise_for_status()
-                html = response.text
-            except requests.HTTPError as he:
-                status = he.response.status_code if he.response is not None else None
-                if status == 403:
-                    reason = "Blocked by the site (403 Forbidden)"
-                elif status == 404:
-                    reason = "Page not found (404)"
-                else:
-                    reason = f"HTTP {status}"
-                page_errors.append({"page": url, "reason": reason})
-                continue
-            except Exception as re:
-                page_errors.append({"page": url, "reason": str(re)})
-                continue
 
-        soup = BeautifulSoup(html, "html.parser")
-        for anchor in soup.find_all("a", href=True):
-            href = urljoin(url, anchor["href"])
-            if ".pdf" in href.lower():
-                label = anchor.get_text(strip=True) or href.split("/")[-1].split("?")[0]
-                pdf_links[label] = href
+        try:
+            wix_pdfs = _extract_pdfs_wix(url)
+            pdf_links.update(wix_pdfs)
+        except Exception as e:
+            print(f"  [PDF extraction failed] {url}: {e}")
+            page_errors.append({"page": url, "reason": str(e)})
 
     return {"documents": pdf_links, "errors": page_errors}
 
@@ -339,8 +511,13 @@ def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10, dyna
         print(f"  Could not parse news from {news_url}: {e}")
         return []
 
-    # Parse "Mon DD, YYYY Headline text" pairs from page text
-    date_re = re.compile(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s{1,3}(\d{1,2}),\s+(\d{4})")
+    # Parse "Month DD, YYYY Headline text" pairs — handles both full names (July, April)
+    # and 3-letter abbreviations (Jul, Apr) since sites use either form
+    date_re = re.compile(
+        r"(January|February|March|April|May|June|July|August|September|October|November|December"
+        r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        r"\s{1,3}(\d{1,2}),\s+(\d{4})"
+    )
     matches = list(date_re.finditer(text))
 
     items = []
@@ -351,11 +528,15 @@ def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10, dyna
         headline = " ".join(text[start:end].split()).strip()[:250]
         if len(headline) < 10:
             continue
-        try:
-            date = datetime.strptime(date_str.replace("  ", " "), "%b %d, %Y")
-            items.append({"date": date, "date_str": date_str, "headline": headline})
-        except ValueError:
-            continue
+        parsed = None
+        for fmt in ("%B %d, %Y", "%b %d, %Y"):
+            try:
+                parsed = datetime.strptime(date_str.replace("  ", " "), fmt)
+                break
+            except ValueError:
+                continue
+        if parsed:
+            items.append({"date": parsed, "date_str": date_str, "headline": headline})
 
     # Newest first, deduplicate by headline
     items.sort(key=lambda x: x["date"], reverse=True)

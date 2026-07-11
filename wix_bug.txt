@@ -1,0 +1,75 @@
+BUG: Mundoro Capital Inc. — only 4 PDFs found (should be 15+)
+================================================================
+
+SITE: https://www.mundoro.com (built on Wix)
+EXPECTED: ~15+ docs — quarterly reports Q1-Q4 2024/2025, AIF, AGM materials, corporate presentation
+ACTUAL: always exactly 4 docs:
+  - View Presentation
+  - View
+  - Read
+  - 33dbb0_4b46d2dcf43c4833bd622c093c454a85.pdf  (broken link, returns 404)
+
+ROOT CAUSE (confirmed from server logs):
+  Wix serves a JS-only skeleton to bots (requests.get returns bare HTML with no wixstatic.com markers).
+  _is_wix_site() returned False → standard Playwright extraction ran instead of enhanced Wix path.
+  Standard path only finds <a href="*.pdf"> tags → finds 4.
+
+HOW WIX SERVES ITS DOCS:
+  The /investors page has hash-section navigation: #reports, #agm-materials, #corporate-presentation, #stock
+  Quarterly reports are in a Wix Document List component — each with a "View" button
+  The PDF URLs are NOT in standard <a href> tags; they are loaded via Wix internal APIs or embedded in JS state
+
+FIXES TRIED (none worked yet):
+----------------------------------------------------------------
+
+FIX 1 — Longer wait (5s) + scroll
+  Idea: give Wix more time to JS-render the document links
+  Result: still 4. Labels changed from hashes to "View"/"Read" (labels improved), PDFs didn't.
+
+FIX 2 — Network response interception (page.on("response", ...))
+  Idea: intercept all network responses, scan JSON bodies for PDF URLs
+  Result: still 4. response.text() in sync Playwright fails silently in event handlers.
+
+FIX 3 — Widen response scan (remove wixstatic.com filter)
+  Idea: scan ALL JSON responses (not just ones already containing wixstatic.com)
+  Result: still 4. response.text() still unreliable in sync Playwright.
+
+FIX 4 — DOM data-* attribute scan via page.evaluate()
+  Idea: check data-url, data-src, data-href, data-file-url on all elements
+  Result: still 4. PDF URLs are not in DOM attributes.
+
+FIX 5 — Incremental scroll (600px steps instead of jump to bottom)
+  Idea: Wix lazy-loads each section as you scroll past it; jumping to bottom misses sections
+  Result: still 4. Wix renders all sections in DOM regardless of scroll position.
+
+FIX 6 — Performance API: performance.getEntriesByType('resource')
+  Idea: use browser's network request log to find every PDF the page actually fetched
+  Result: still 4. PDFs are not fetched as resources on page load — they're only fetched when user clicks View.
+
+FIX 7 — Hash section navigation (visit /investors#reports, #agm-materials, etc.)
+  Idea: Wix hash sections might load different content; visit each one separately
+  Result: still 4. Hash navigation didn't trigger new content to load.
+
+FIX 8 — Playwright-rendered homepage for Wix detection
+  Idea: requests.get() misses Wix markers; fall back to rendering with Playwright to detect Wix
+  Result: still 4. [Wix detected] still never appeared in logs — detection still broken.
+
+FIX 9 — Click "View"/"Read" buttons via page.on("popup", callback)
+  Idea: Wix document buttons only reveal the PDF URL when clicked — click them all and capture the popup
+  Result: still 4. page.on("popup") event callback is unreliable in sync Playwright (fires too late).
+
+FIX 10 — Remove Wix detection, always use enhanced extraction + expect_popup()
+  Idea: Remove is_wix detection entirely — it has failed for 9 fixes in a row.
+        Always call _extract_pdfs_wix() for ALL investor pages (non-Wix sites work too:
+        the scroll/click pass just finds nothing extra, the <a href> pass still runs).
+        Replace page.on("popup") callback (async, unreliable in sync Playwright) with
+        synchronous page.expect_popup() context manager — captures popup exactly when click fires.
+        Navigate back to the investor page after hash-navigation, before clicking buttons.
+  Result: ✅ FIXED — 19 PDFs found (was 4). Root causes resolved:
+          1. Detection removed → _extract_pdfs_wix always runs now
+          2. expect_popup() synchronously captures Wix Document List popups reliably
+
+STILL TO TRY IF FIX 10 FAILS:
+  B. Read window.__VIEWER_RENDER_STATE__ from page JS — Wix stores all document data there.
+  C. Playwright CDP session — intercept response bodies reliably via Chrome DevTools Protocol.
+  D. Check if documents are behind Wix Members Area login gate (would explain everything).

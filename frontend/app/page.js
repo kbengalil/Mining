@@ -110,6 +110,11 @@ export default function ChatPage() {
             clearInterval(pollRef.current);
             clearInterval(timerRef.current);
             setJobStatus("error");
+          } else if (data.status === "cancelled") {
+            clearInterval(pollRef.current);
+            clearInterval(timerRef.current);
+            setJobStatus("error");
+            setJobData((d) => ({ ...d, error: "Analysis stopped." }));
           }
         })
         .catch(() => {});
@@ -231,7 +236,23 @@ export default function ChatPage() {
             )}
 
             {jobStatus === "running" && (
-              <p className="text-xs text-gray-400 font-mono">{formatTime(elapsed)}</p>
+              <div className="flex items-center gap-3 mt-1">
+                <p className="text-xs text-gray-400 font-mono">{formatTime(elapsed)}</p>
+                <button
+                  onClick={() => {
+                    const id = activeJob?.jobId;
+                    if (!id) return;
+                    fetch(`${API}/overview-jobs/${id}/cancel`, { method: "POST" }).catch(() => {});
+                    clearInterval(pollRef.current);
+                    clearInterval(timerRef.current);
+                    setJobStatus("error");
+                    setJobData((d) => ({ ...d, error: "Analysis stopped." }));
+                  }}
+                  className="text-xs px-2 py-1 border border-red-200 rounded text-red-500 hover:bg-red-50 transition-colors"
+                >
+                  ⏹ Stop
+                </button>
+              </div>
             )}
 
             {jobStatus === "done" && (

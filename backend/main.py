@@ -171,6 +171,9 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
                 job["error"] = "Could not find investor documents for this company."
                 return
 
+        if job.get("status") == "cancelled":
+            return
+
         overview_md = generate_overview(company_name, pdf_docs, on_progress, dynamic_companies)
         _save_overview(company_name, overview_md, current_urls)
         job["status"] = "done"
@@ -284,6 +287,16 @@ def get_overview_job(job_id: str):
     return job
 
 
+@app.post("/overview-jobs/{job_id}/cancel")
+def cancel_overview_job(job_id: str):
+    job = overview_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] == "running":
+        job["status"] = "cancelled"
+    return {"status": job["status"]}
+
+
 class ChatRequest(BaseModel):
     message: str
     documents: dict[str, str] = {}  # only needed on the first message of a conversation
@@ -300,7 +313,10 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
     provided_url = url_match.group(0).rstrip(".,)/\\ ") if url_match else None
 
     # Check if user wants to analyze a specific company
-    company_name = detect_company_intent(payload.message)
+    try:
+        company_name = detect_company_intent(payload.message)
+    except Exception:
+        company_name = None
 
     # URL provided but no company name detected — identify from URL
     if not company_name and provided_url:
