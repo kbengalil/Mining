@@ -1,0 +1,135 @@
+## David Lotan — Strategic Investor Framework
+
+David Lotan is President of LHI Capital. Former portfolio manager at Ontario Teachers' Pension Plan, structured finance at Polar Capital (Canadian merchant bank), PwC risk management. Known for buying junior miners in the open market and taking board/chairman roles to bring them to acquisition.
+
+Source: Mining Stock Education podcast with host Bill Powers, 2026.
+
+---
+
+### 1. Where the real bargains are
+
+"Especially in the last decade, the real bargains are in the open market. It's far more valuable to find little companies trading for peanuts where management is just missing one of those ingredients. If you can grab a hold of that capital structure before it's gotten ruined and if management is well-intended and can follow an investor-friendly pathway, you can get fantastic outcomes."
+
+Key signals: cheap stock + good property + weak marketer/financier = opportunity. The asset is there; what's missing is capital markets execution.
+
+---
+
+### 2. Open market buying as the alignment signal
+
+Lotan bought 97-98% of his positions in the open market, not in private placements. He views this as the strongest alignment signal an investor can give.
+
+"Retail investors can go back and see historic open market purchases again and again and again."
+
+Application: when evaluating management and board, check SEDI for open market purchases vs. participation only in private placements at discounts.
+
+---
+
+### 3. Capital structure discipline when companies are desperate
+
+When a company runs out of money at a very low price, the predatory move is to convert at rock-bottom terms (lending money and converting to equity, or doing a large placement with heavy warrants). The investor-friendly move is to lend money at low cost, wait for markets to recover, and then finance at a much higher price with no warrant — issuing a fraction of the shares a distress financing would have required.
+
+Key principle: protect the cap structure even when you have leverage. A ruined capital structure reduces everyone's outcome, including yours.
+
+---
+
+### 4. Warrant-free financing as a quality signal
+
+Getting a financing done without warrants is a significant accomplishment. It signals:
+- Strong investor demand
+- Low cost of capital
+- Management that does not need to give away option value to close a deal
+
+When evaluating recent financings, check whether warrants were included and at what ratio. A clean financing (shares only, no warrants) is a positive signal. A financing done with warrants at a deep discount during distress is a red flag for capital structure quality.
+
+---
+
+### 5. Always maximize pathways forward
+
+"In every phase of the company's development, we just always try to make decisions that leave the company with the maximum number of pathways forward."
+
+The three factors that determine pathways:
+1. Cash in the bank
+2. Shares outstanding (the lower, the more flexible)
+3. Promise of the property
+
+A company with strong cash, a tight share count, and a quality deposit has maximum optionality. A company with a good deposit but a bloated share count and thin cash is trapped — it must finance on bad terms or sell at a discount.
+
+---
+
+### 6. Chairman with zero compensation = investor alignment
+
+Taking no compensation (no salary, no stock options, no DSUs/RSUs) is a commercial decision, not an altruistic one:
+- It differentiates the company from the norm
+- It lowers the cost of capital
+- It gives investors confidence that the key decision-maker is completely aligned with them
+
+"I took nothing from the company. No compensation of any kind, no stock options, no unit equity. I did that for commercial reasons — it was an easy way to differentiate from other junior mining stories."
+
+Application: flag insider compensation relative to company stage and cash burn. A chairman drawing a high salary from a pre-revenue junior is a red flag.
+
+---
+
+### 7. M&A timing depends on the major company consolidation cycle
+
+When major gold producers are merging with each other, there is little M&A activity in juniors — the majors are distracted and digesting.
+
+M&A in juniors restarts when:
+1. The middle-market gold companies grow significantly in market cap
+2. Producers begin trading at greater than 1x price-to-NAV — this gives them the currency to do acquisitions without being immediately dilutive
+
+"The drive for mergers and acquisitions comes from the middle of the market."
+
+Application: junior developer valuations are partly a function of where we are in the major/mid-tier M&A cycle, not just the project itself. A fully-permitted developer with a great project can still be stuck if acquirers are consolidating among themselves.
+
+---
+
+### 8. Accommodative deal posture maximizes shareholder value
+
+To maximize exit price in an M&A transaction:
+- Keep secrets (confidentiality discipline)
+- Do not retrade agreed terms
+- Let the acquirer drive structural preferences
+- Be seen as commercially reasonable
+
+"We just wanted to help. You can infer from that that the major terms were entirely driven by the acquirer and we trusted that if we were working together towards a win-win, our shareholders would be fairly treated."
+
+Counter-intuitive: being less aggressive in negotiating terms can produce a better outcome than fighting over every point, because it keeps more bidders engaged and maintains trust.
+
+---
+
+### 9. The rational actor fallacy
+
+"The biggest fallacy in economics is the fallacy of the rational actor. It is a huge mistake to assume that any counterparty you are negotiating with is necessarily going to be rational, especially when they have been embarrassed."
+
+Application: in jurisdiction and management risk assessment, counterparties (governments, JV partners, competing companies) may act against their own economic interest when reputation or pride is involved. Do not model outcomes assuming rational behavior from any party.
+
+---
+
+### 10. Time horizon in junior mining is always longer than expected
+
+A planned 2-3 year investment can easily become a 9+ year hold. This is not unusual. Junior mining requires:
+- Willingness to wait through bear markets, false starts, and hostile situations
+- A financial position that does not force selling at the wrong time
+- Independent income so the investment is not under liquidity pressure
+
+Investors who overextend or set rigid time horizons in junior mining consistently underperform or sell at the bottom.
+
+---
+
+### 11. Prospect generator vs. sole-risk exploration — a critical fork
+
+At some point every junior must choose:
+- Prospect generator: option properties to majors, raise small amounts, preserve cap structure, collect milestone payments
+- Sole-risk exploration: concentrate capital on one target, raise tens of millions, accept more dilution but control your own destiny
+
+This decision changes the financing requirement by roughly 10x and the dilution profile dramatically. Neither is wrong, but investors and management must be aligned on which path is chosen and why.
+
+---
+
+### 12. If you try to keep everything for yourself, you often end up with nothing
+
+Applies to: royalties, streams, management compensation, JV terms, M&A negotiation.
+
+The junior mining sector has many examples of promoters who extracted so much from the company (salary, options, placed shares at discount) that outside investors received poor returns despite a good asset. The companies that generate the best investor returns tend to be run by people who are already financially secure and focused on the asset outcome, not personal extraction.
+
+"If you try to keep everything for yourself, you often end up with nothing. That is a cliche in business that I think is often true."

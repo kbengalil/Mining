@@ -181,6 +181,13 @@ More specific and actionable than peer benchmarking against active companies.
 Per company, generate the specific questions Rick Rule (or Kevin McLean) would ask in a management call.
 Good demo material, defensible differentiator, and directly uses our existing RAG.
 
+**Cost inflation / sensitivity sliders** ⭐ (Rick Rule session 2026-07-08)
+Interactive tool on the company report page. Two sliders: cost inflation % (0–50%) and gold price assumption.
+Both recalculate CAPEX, AISC, NPV, and IRR in real time.
+Core insight: feasibility studies go stale fast — Kevin McLean: "two years old, almost not applicable."
+This makes that risk visible and quantifiable. Extends #2 (NPV recalculation) with the cost-escalation dimension.
+OS will never build this — showing users how bad the numbers get under stress is not in their interest.
+
 **Compliance / disclaimer architecture**
 As we add fair-value ranges, scores, and NPV recalculations we drift toward investment advice.
 Get the disclaimer architecture right early — frame all outputs as research, not recommendations.
@@ -277,21 +284,22 @@ Roadmap stages:
 12. Technical report diffing — ChatGPT
 13. Red flags first (UX) — Gemini
 14. Permit & regulatory timeline tracker — Gemini
-15. Compliance / disclaimer architecture — Fable
+15. Cost inflation / sensitivity sliders — Rick Rule session (2026-07-08)
+16. Compliance / disclaimer architecture — Fable
 
 **Tier 3 — Later**
-16. Management intelligence profiles — ChatGPT, Opus
-17. Timeline mode — ChatGPT
-18. Mine economics benchmarking — ChatGPT
-19. M&A comp benchmarking — Fable
-20. Dilution & insider chart overlay — Gemini
-21. Map integration — Gemini
-22. Lassonde curve positioning — Opus
-23. "Five questions the expert would ask" — Fable
-24. Clickable glossary — ChatGPT
-25. Cross-document Q&A — ChatGPT
-26. Portfolio view — Perplexity, ChatGPT
-27. Investment fit triage — Perplexity
-28. Drill hole data parsing — Gemini
-29. Missing diligence flagging — Perplexity
-30. Valuation lens modes — Perplexity, Opus, Fable
+17. Management intelligence profiles — ChatGPT, Opus
+18. Timeline mode — ChatGPT
+19. Mine economics benchmarking — ChatGPT
+20. M&A comp benchmarking — Fable
+21. Dilution & insider chart overlay — Gemini
+22. Map integration — Gemini
+23. Lassonde curve positioning — Opus
+24. "Five questions the expert would ask" — Fable
+25. Clickable glossary — ChatGPT
+26. Cross-document Q&A — ChatGPT
+27. Portfolio view — Perplexity, ChatGPT
+28. Investment fit triage — Perplexity
+29. Drill hole data parsing — Gemini
+30. Missing diligence flagging — Perplexity
+31. Valuation lens modes — Perplexity, Opus, Fable

@@ -80,7 +80,7 @@ def _call_gemini(history: list) -> str:
             GEMINI_URL,
             headers={"x-goog-api-key": key, "Content-Type": "application/json"},
             json=payload,
-            timeout=120,
+            timeout=1000,
         )
         if response.ok:
             break
@@ -111,7 +111,7 @@ COMPANY DOCUMENTS:
 Write EXACTLY these 11 sections with markdown headers. Be concise and factual.
 
 ## Recent Developments
-Summarize the most significant news from the last 6 months. Focus on material events: permits, agreements, financings, drill results, project milestones. 3-5 bullet points. Note the date for each item.
+List EVERY material news item from the last 6 months found in the documents or recent news feed. Include all of: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event, with the exact date. Do not summarize multiple events into one bullet.
 
 ## Company Snapshot
 3-5 bullet points. What the company mines, where, and development stage (exploration / PEA / PFS / feasibility / production).
@@ -132,13 +132,27 @@ From the Management Information Circular (proxy document):
 Also check presentations and fact sheets for major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail (e.g. converted debt to equity, long-term holder, founding investor).
 
 ## Key Project Metrics
-3-5 bullet points per project. Resource size, NPV (note whether pre-tax or after-tax), IRR, capex, mine life. Only include figures from the documents.
-For each project also note if disclosed: exploration upside (strike length drilled vs. total strike length, % of trend tested, new zones discovered).
+For EACH project, extract ALL of the following that are disclosed — do not skip any:
+- Resource: tonnes, grade, contained metal (state M&I and Inferred separately)
+- Reserves: tonnes, grade, contained metal (if stated)
+- NPV: amount, discount rate, commodity price assumed, pre-tax or post-tax
+- IRR: % and commodity price assumed
+- Initial capex
+- Mine life
+- Average annual production (state the period, e.g. years 1-5 vs LOM)
+- Exploration upside (open along strike/depth, new zones, % of trend tested)
 Include growth projects from any announced mergers or acquisitions — label them clearly as "(from pending acquisition of [company])".
 
 ## Financials
-3-5 bullet points. Cash position, shares outstanding, burn rate, recent financing activity.
-Also include if disclosed in any document: projected annual cash flow or net cash flow at current metal prices, pro forma balance sheet figures from merger or transaction documents, and any stated annual exploration or capital spending budget.
+Extract ALL of the following that are disclosed — do not summarize or skip:
+- Cash on hand (state the date of the figure)
+- Shares outstanding (state the date)
+- Warrants outstanding (number and expiry/strike if disclosed)
+- Options/RSUs/PSUs/DSUs outstanding (totals)
+- Burn rate (% of shares issued under equity plan per year, for each year disclosed)
+- EVERY financing event in the documents: date, type (private placement / public offering / flow-through / warrant exercise), amount raised, shares issued, warrant coverage if any
+- Projected annual cash flow or net free cash flow (LOM or annual, if disclosed)
+- Any stated annual exploration or capital spending budget
 
 ## Jurisdiction
 3-5 bullet points. Country/region of main projects, any sovereign risk factors mentioned in the documents.

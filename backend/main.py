@@ -182,24 +182,45 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
 
 @app.post("/companies/{company_name}/overview/start")
 def start_overview(company_name: str, background_tasks: BackgroundTasks, force: bool = False):
-    if company_name not in COMPANIES and company_name not in dynamic_companies:
-        raise HTTPException(status_code=404, detail="Unknown company")
+    from urllib.parse import urlparse
 
-    result = find_pdf_links(company_name, dynamic_companies)
-    pdf_docs = result["documents"]
-    current_urls = sorted(pdf_docs.values())
-    pdf_list = list(pdf_docs.keys())
-    selected_pdfs = list(_filter_docs(pdf_docs).keys())
+    # Determine if a fresh crawl is needed (dynamic company not in memory)
+    needs_crawl = False
+    crawl_url = None
+    if company_name not in COMPANIES:
+        company_info = dynamic_companies.get(company_name, {})
+        if not company_info.get("investor_pages"):
+            # Server restarted or placeholder — recover base_url from Supabase source_urls
+            crawl_url = company_info.get("base_url")
+            if not crawl_url:
+                cached = supabase.table("company_overviews").select("source_urls").eq("company_name", company_name).limit(1).execute()
+                if cached.data and cached.data[0].get("source_urls"):
+                    first_url = cached.data[0]["source_urls"][0]
+                    p = urlparse(first_url)
+                    crawl_url = f"{p.scheme}://{p.netloc}"
+                else:
+                    raise HTTPException(status_code=404, detail="Unknown company — paste the URL in chat to analyze")
+            dynamic_companies[company_name] = {"base_url": crawl_url, "investor_pages": [], "about_pages": [], "news_page": "/news/"}
+            needs_crawl = True
 
-    if not force:
-        existing = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
-        if existing.data and sorted(existing.data[0]["source_urls"]) == current_urls:
-            return {
-                "cached": True,
-                "overview_markdown": existing.data[0]["overview_markdown"],
-                "pdfs": pdf_list,
-                "selected_pdfs": selected_pdfs,
-            }
+    if needs_crawl:
+        pdf_docs, current_urls, pdf_list, selected_pdfs = {}, [], [], []
+    else:
+        result = find_pdf_links(company_name, dynamic_companies)
+        pdf_docs = result["documents"]
+        current_urls = sorted(pdf_docs.values())
+        pdf_list = list(pdf_docs.keys())
+        selected_pdfs = list(_filter_docs(pdf_docs).keys())
+
+        if not force:
+            existing = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
+            if existing.data and sorted(existing.data[0]["source_urls"]) == current_urls:
+                return {
+                    "cached": True,
+                    "overview_markdown": existing.data[0]["overview_markdown"],
+                    "pdfs": pdf_list,
+                    "selected_pdfs": selected_pdfs,
+                }
 
     job_id = str(uuid.uuid4())
     overview_jobs[job_id] = {
@@ -209,10 +230,11 @@ def start_overview(company_name: str, background_tasks: BackgroundTasks, force: 
         "current": 0,
         "total": len(pdf_docs),
         "pdfs": pdf_list,
+        "selected_pdfs": selected_pdfs,
         "pdf_urls": pdf_docs,
     }
-    background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls)
-    return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": selected_pdfs, "cached": False}
+    background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, crawl_url)
+    return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": selected_pdfs, "pdf_urls": pdf_docs, "cached": False}
 
 
 @app.delete("/companies/{company_name}/overview")
@@ -227,8 +249,24 @@ def archive_overview(company_name: str):
     if not row.data:
         raise HTTPException(status_code=404, detail="No report found to archive")
     existing = row.data[0]
-    archived_name = f"_{company_name} [archived]"
-    supabase.table("company_overviews").delete().eq("company_name", archived_name).execute()
+    # Find next available archive number
+    base = f"_{company_name} [archived"
+    all_names = [r["company_name"] for r in supabase.table("company_overviews").select("company_name").like("company_name", f"{base}%").execute().data or []]
+    # Extract existing numbers: [archived] = 1, [archived 2] = 2, etc.
+    used = set()
+    for n in all_names:
+        suffix = n[len(base):]  # e.g. "]" or " 2]"
+        if suffix == "]":
+            used.add(1)
+        elif suffix.startswith(" ") and suffix.endswith("]"):
+            try:
+                used.add(int(suffix[1:-1]))
+            except ValueError:
+                pass
+    num = 1
+    while num in used:
+        num += 1
+    archived_name = f"_{company_name} [archived]" if num == 1 else f"_{company_name} [archived {num}]"
     supabase.table("company_overviews").insert({
         "company_name": archived_name,
         "overview_markdown": existing["overview_markdown"],
@@ -334,7 +372,17 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
         )
         return {"reply": reply, "session_id": payload.session_id, "job_id": job_id, "company": company_name}
 
-    reply, session_id = send_message(payload.message, payload.documents, payload.session_id)
+    try:
+        reply, session_id = send_message(payload.message, payload.documents, payload.session_id)
+    except Exception as e:
+        msg = str(e)
+        if "503" in msg or "502" in msg:
+            reply = "The AI service is temporarily unavailable (Gemini 503). Please try again in a moment."
+        elif "timed out" in msg.lower() or "timeout" in msg.lower():
+            reply = "The request timed out. Please try again."
+        else:
+            reply = f"Something went wrong: {msg}"
+        return {"reply": reply, "session_id": payload.session_id}
     return {"reply": reply, "session_id": session_id}
 
 

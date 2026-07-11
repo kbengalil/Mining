@@ -106,6 +106,14 @@ Stored in Supabase `knowledge_base` table with pgvector embeddings. Agent retrie
 ### Auth (later)
 Supabase Auth (already in schema). Add login/signup when the app opens up beyond a single user. At that point, SSR will be enabled in Next.js so the server can verify auth before sending the page.
 
+### Sensitivity / "What If" Sliders (later)
+Interactive tool on the company report page letting the user stress-test the feasibility study assumptions:
+- **Cost inflation slider** (0–50%) — inflates CAPEX and AISC proportionally, recalculates NPV and IRR in real time
+- **Gold price slider** — adjusts the assumed gold price, recalculates NPV and IRR
+- Both sliders work together so the user can model combined scenarios (e.g. +20% costs AND $2,000/oz gold)
+- Key outputs shown: adjusted CAPEX, adjusted AISC, adjusted NPV, adjusted IRR
+- Motivation: feasibility studies go stale fast (Kevin McLean: "two years old, almost not applicable") — this tool makes that risk visible and quantifiable
+
 ### Production Deployment (later)
 - Rotate all API keys
 - Deploy FastAPI backend to Render or Fly.io

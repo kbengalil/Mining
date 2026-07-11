@@ -139,6 +139,32 @@ export default function CompanyPage() {
               ↻ Regenerate
             </button>
           )}
+          {(status === "cached" || status === "done") && (
+            <button
+              onClick={() => {
+                if (!confirm(`Archive report for ${companyName}?`)) return;
+                fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/archive`, { method: "POST" })
+                  .then(r => r.json())
+                  .then(d => alert(`Archived as: ${d.archived_as}`))
+                  .catch(() => alert("Archive failed"));
+              }}
+              className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
+            >
+              📦 Archive
+            </button>
+          )}
+          {(status === "cached" || status === "done") && (
+            <button
+              onClick={() => {
+                if (!confirm(`Delete report for ${companyName}?`)) return;
+                fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`, { method: "DELETE" })
+                  .then(() => window.location.href = "/");
+              }}
+              className="text-sm px-4 py-2 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+            >
+              🗑 Delete
+            </button>
+          )}
           <Link
             href={`/companies/${encodeURIComponent(companyName)}/charts`}
             className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
