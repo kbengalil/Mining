@@ -321,37 +321,122 @@ def _extract_pdfs_wix(url: str) -> dict:
             except Exception:
                 pass
 
-            # Click-through pass: click every "View"/"Read"/"Download" button using
-            # expect_popup() (synchronous, reliable) to capture the PDF URL that Wix
-            # only reveals when the user clicks — page.on("popup") was async/unreliable
+            # Click-through pass: case-insensitive broad matching, popup then download fallback
+            # Wix → expect_popup() (opens new tab); WordPress → expect_download() (direct download)
             clicked_pdfs = {}
 
-            for btn_text in ["View", "Read", "Download"]:
-                try:
-                    elements = page.locator(f"text='{btn_text}'").all()
-                    for el in elements[:20]:
+            btn_keywords = ["view", "read", "download", "annual", "quarterly", "presentation", "report"]
+            btn_exact    = {"fs", "md&a", "mda", "aif"}
+            _GENERIC_BTN = {"view", "download", "read", "open", "here", "view pdf", "download pdf", "read pdf", "financial reports", "financial statements", "annual report", "quarterly report"}
+
+            try:
+                all_els = page.locator("a, button").all()
+                for el in all_els[:150]:
+                    try:
+                        if not el.is_visible():
+                            continue
                         try:
-                            if not el.is_visible():
+                            text = (el.inner_text() or "").strip()
+                        except Exception:
+                            continue
+                        tl = text.lower().strip()
+                        if not tl:
+                            continue
+                        if not (any(kw in tl for kw in btn_keywords) or any(ex in tl for ex in btn_exact)):
+                            continue
+
+                        # If element already has a PDF href, grab it without clicking
+                        try:
+                            href = el.get_attribute("href") or ""
+                            if ".pdf" in href.lower():
+                                # .href property resolves relative URLs on <a> tags; non-<a> Wix
+                                # elements have the attribute but undefined .href property, so
+                                # fall back to urljoin which always produces an absolute URL.
+                                try:
+                                    prop = el.evaluate("el => typeof el.href === 'string' ? el.href : ''") or ""
+                                except Exception:
+                                    prop = ""
+                                abs_href = prop if prop and not prop.startswith("/") else urljoin(url, href)
+                                fname = abs_href.split("/")[-1].split("?")[0].replace(".pdf", "")
+                                # Prefer the URL filename over generic single-word button text
+                                if tl in _GENERIC_BTN and fname and len(fname) > 8:
+                                    label = fname
+                                else:
+                                    label = text or fname or "Document"
+                                if label in clicked_pdfs:
+                                    i = 2
+                                    while f"{label} ({i})" in clicked_pdfs:
+                                        i += 1
+                                    label = f"{label} ({i})"
+                                clicked_pdfs[label] = abs_href
                                 continue
-                            el.scroll_into_view_if_needed()
-                            page.wait_for_timeout(200)
-                            with page.expect_popup(timeout=5000) as popup_info:
+                        except Exception:
+                            pass
+
+                        el.scroll_into_view_if_needed()
+                        page.wait_for_timeout(200)
+
+                        # Try popup first (Wix Document List pattern)
+                        try:
+                            with page.expect_popup(timeout=3000) as popup_info:
                                 el.click()
                             popup_page = popup_info.value
                             try:
                                 popup_page.wait_for_load_state("domcontentloaded", timeout=8000)
                                 pu = popup_page.url
                                 if ".pdf" in pu.lower():
-                                    label = pu.split("/")[-1].split("?")[0].replace(".pdf", "") or "Document"
+                                    label = text or pu.split("/")[-1].split("?")[0].replace(".pdf", "") or "Document"
+                                    if label in clicked_pdfs:
+                                        i = 2
+                                        while f"{label} ({i})" in clicked_pdfs:
+                                            i += 1
+                                        label = f"{label} ({i})"
                                     clicked_pdfs[label] = pu
                             finally:
                                 popup_page.close()
                         except Exception:
-                            pass
-                except Exception:
-                    pass
+                            # Popup didn't open — try download (WordPress/standard sites)
+                            try:
+                                with page.expect_download(timeout=3000) as dl_info:
+                                    el.click()
+                                dl = dl_info.value
+                                pu = dl.url
+                                fname = dl.suggested_filename or ""
+                                if ".pdf" in pu.lower() or fname.lower().endswith(".pdf"):
+                                    label = text or fname.replace(".pdf", "") or pu.split("/")[-1].split("?")[0] or "Document"
+                                    if label in clicked_pdfs:
+                                        i = 2
+                                        while f"{label} ({i})" in clicked_pdfs:
+                                            i += 1
+                                        label = f"{label} ({i})"
+                                    clicked_pdfs[label] = pu
+                                try:
+                                    dl.cancel()
+                                except Exception:
+                                    pass
+                            except Exception:
+                                # Neither popup nor download — check if page navigated to a PDF
+                                try:
+                                    page.wait_for_timeout(1500)
+                                    pu = page.url
+                                    if ".pdf" in pu.lower():
+                                        label = text or pu.split("/")[-1].split("?")[0].replace(".pdf", "") or "Document"
+                                        if label in clicked_pdfs:
+                                            i = 2
+                                            while f"{label} ({i})" in clicked_pdfs:
+                                                i += 1
+                                            label = f"{label} ({i})"
+                                        clicked_pdfs[label] = pu
+                                        page.go_back()
+                                        page.wait_for_timeout(1000)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(500)
 
         finally:
             ctx.close()
@@ -361,12 +446,20 @@ def _extract_pdfs_wix(url: str) -> dict:
 
     pdf_links = {}
 
+    _GENERIC_LINK_TEXT = {"view", "download", "read", "open", "here", "view pdf", "download pdf", "read pdf", "financial reports", "financial statements", "annual report", "quarterly report"}
+
     # 1. <a href="*.pdf"> from rendered HTML
     soup = BeautifulSoup(html, "html.parser")
     for a in soup.find_all("a", href=True):
         href = urljoin(url, a["href"])
         if ".pdf" in href.lower():
-            label = a.get_text(strip=True) or href.split("/")[-1].split("?")[0]
+            raw_text = a.get_text(strip=True)
+            fname = href.split("/")[-1].split("?")[0].replace(".pdf", "")
+            # Prefer URL filename over generic button text (e.g. "Download PDF" → actual filename)
+            if raw_text.lower() in _GENERIC_LINK_TEXT and fname and len(fname) > 8:
+                label = fname
+            else:
+                label = raw_text or fname
             pdf_links[label] = href
 
     # 2. Bare PDF URLs in raw HTML source
@@ -393,7 +486,7 @@ def _extract_pdfs_wix(url: str) -> dict:
         if u not in pdf_links.values():
             pdf_links[label] = u
 
-    print(f"  [Wix] {url} → {len(pdf_links)} PDFs found (click-through: {len(clicked_pdfs)})")
+    print(f"  [Wix] {url} -> {len(pdf_links)} PDFs found (click-through: {len(clicked_pdfs)})")
     return pdf_links
 
 

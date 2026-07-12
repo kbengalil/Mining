@@ -52,12 +52,39 @@ export default function CompanyPage() {
       // Job already started from chat — poll it directly
       jobIdRef.current = existingJobId;
       setStatus("running");
-      startTimeRef.current = Date.now();
+      const savedStart = sessionStorage.getItem(`job_start_${companyName}`);
+      startTimeRef.current = savedStart ? parseInt(savedStart) : Date.now();
+      if (!savedStart) sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
       timerRef.current = setInterval(() => {
         setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 1000);
       pollRef.current = setInterval(() => pollJob(existingJobId), 1000);
     } else {
+      // Check if there's already a running job for this company
+      fetch(`${API}/companies/${encodeURIComponent(companyName)}/active-job`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((active) => {
+          if (active?.job_id) {
+            jobIdRef.current = active.job_id;
+            setStatus("running");
+            const savedStart = sessionStorage.getItem(`job_start_${companyName}`);
+            startTimeRef.current = savedStart ? parseInt(savedStart) : Date.now();
+            if (!savedStart) sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
+            timerRef.current = setInterval(() => {
+              setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+            }, 1000);
+            pollRef.current = setInterval(() => pollJob(active.job_id), 1000);
+          } else {
+            checkCacheOrStart();
+          }
+        })
+        .catch(() => checkCacheOrStart());
+    }
+
+    return () => { clearInterval(pollRef.current); clearInterval(timerRef.current); };
+  }, [companyName, existingJobId]);
+
+  function checkCacheOrStart() {
       // First check if a cached report exists — show it immediately
       fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`)
         .then((r) => r.ok ? r.json() : null)
@@ -72,7 +99,14 @@ export default function CompanyPage() {
               });
               setPdfUrls(map);
               setPdfs(Object.keys(map));
-              setSelectedPdfs(Object.keys(map));
+              if (cached.selected_urls && cached.selected_urls.length > 0) {
+                const selectedLabels = cached.selected_urls.map(
+                  (url) => decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, ""))
+                );
+                setSelectedPdfs(selectedLabels);
+              } else {
+                setSelectedPdfs(Object.keys(map));
+              }
             }
             setStatus("cached");
           } else {
@@ -80,10 +114,7 @@ export default function CompanyPage() {
           }
         })
         .catch(() => startAnalysis());
-    }
-
-    return () => { clearInterval(pollRef.current); clearInterval(timerRef.current); };
-  }, [companyName, existingJobId]);
+  }
 
   function startAnalysis() {
     fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start?force=true`, { method: "POST" })
@@ -95,6 +126,7 @@ export default function CompanyPage() {
         jobIdRef.current = data.job_id;
         setStatus("running");
         startTimeRef.current = Date.now();
+        sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
         timerRef.current = setInterval(() => {
           setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
         }, 1000);
@@ -105,7 +137,16 @@ export default function CompanyPage() {
 
   function pollJob(jobId) {
     fetch(`${API}/overview-jobs/${jobId}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) {
+          clearInterval(pollRef.current);
+          clearInterval(timerRef.current);
+          setStatus("error");
+          setError("Analysis not found. The server may have restarted — please try again.");
+          return Promise.reject(r.status);
+        }
+        return r.json();
+      })
       .then((data) => {
         setJob(data);
         // Populate pdfs from job data when navigating from chat
@@ -115,17 +156,20 @@ export default function CompanyPage() {
         if (data.status === "done") {
           clearInterval(pollRef.current);
           clearInterval(timerRef.current);
+          sessionStorage.removeItem(`job_start_${companyName}`);
           setFinalTime(Math.floor((Date.now() - startTimeRef.current) / 1000));
           setOverview(data.overview_markdown);
           setStatus("done");
         } else if (data.status === "error") {
           clearInterval(pollRef.current);
           clearInterval(timerRef.current);
+          sessionStorage.removeItem(`job_start_${companyName}`);
           setError(data.error);
           setStatus("error");
         } else if (data.status === "cancelled") {
           clearInterval(pollRef.current);
           clearInterval(timerRef.current);
+          sessionStorage.removeItem(`job_start_${companyName}`);
           setStatus("error");
           setError("Analysis stopped.");
         }

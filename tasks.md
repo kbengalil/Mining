@@ -11,10 +11,10 @@
 - [ ] **`_filter_docs` not catching all bad docs** — Issues seen across reports:
   - ESTMA file slipped through (anchor text probably didn't match the regex)
   - All 4 AIFs included instead of just the latest (AIF_RE not matching anchor text labels)
-  - 2015 quarterly financials included (ancient docs, no cutoff rule for old filings)
   - "EQX-Test-PDF" showing in Equinox docs (test file, should be caught by SKIP_RE but label format `EQX-Test-PDF` may not match)
   - Equinox still shows 95 docs total (filter too permissive for large sites with many ESTMA/ESG/compliance files)
-  - Mundoro: Q4 2022 FS (4 years old), Form of Proxy, Financial Statements Request Form all fed to Gemini
+  - [x] Mundoro: Form of Proxy, Financial Statements Request Form — fixed: added `\bproxy\b`, `\bvif\b`, `request\s+form` to SKIP_RE
+  - [x] 2020 Platinex FS/MD&A, 2022 old financials — fixed: drop financial docs where all years in label ≤ today.year - 4
 
 - [ ] **Performance: `_extract_pdfs_wix` runs for ALL companies** — Removed Wix detection so enhanced extraction always runs. Non-Wix sites hit button-click timeouts (5s each, up to 20 buttons × 3 texts = potential 5 min delay). Fix: restore lightweight Wix detection OR reduce button-click timeout significantly for non-Wix sites.
 
@@ -32,7 +32,7 @@
 
 ## Content
 
-- [ ] **Ingest Bob Quartermain framework into RAG knowledge base** — Framework is in `backend/bob_quartermain_framework.txt`. Needs to be chunked and embedded into Supabase pgvector.
+- [x] **Ingest Bob Quartermain framework into RAG knowledge base** — 11 chunks added. Speaker column added to all 189 rows.
 
 ## Fixed This Session
 

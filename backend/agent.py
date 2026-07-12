@@ -149,7 +149,7 @@ Extract ALL of the following that are disclosed — do not summarize or skip:
 - Shares outstanding (state the date)
 - Warrants outstanding (number and expiry/strike if disclosed)
 - Options/RSUs/PSUs/DSUs outstanding (totals)
-- Burn rate (% of shares issued under equity plan per year, for each year disclosed)
+- Cash burn rate (total cash used in operating activities per year, for each year disclosed in the financials)
 - EVERY financing event in the documents: date, type (private placement / public offering / flow-through / warrant exercise), amount raised, shares issued, warrant coverage if any
 - Projected annual cash flow or net free cash flow (LOM or annual, if disclosed)
 - Any stated annual exploration or capital spending budget
@@ -175,7 +175,6 @@ Technical Studies:
 
 Valuation:
 - Are NPV figures pre-tax or post-tax? Flag if pre-tax only.
-- What gold/commodity price was assumed in the BASE CASE of each study? ONLY flag this if the base case assumed price is ABOVE the current gold price (which inflates the NPV). Ignore spot-price or sensitivity scenarios — only the base case assumption matters. If the base case price is below current gold price, skip this item entirely — do not mention it.
 - Are government carried interests, royalties, and taxes fully netted out of the investor-level NPV, or is the NPV stated at project level only?
 
 Dilution:
@@ -191,7 +190,9 @@ Legal & Environmental:
 - Any other ongoing litigation?
 
 Financials:
-- Is the current cash position disclosed? If yes, estimate runway based on burn rate. If not disclosed, flag it.
+- Is the current cash position disclosed? If not disclosed, flag it.
+  - If the company is in EXPLORATION stage (no construction decision made, no project financing arranged): divide cash on hand by the most recent annual cash burn rate (cash used in operating activities) to estimate runway in months. State the calculation explicitly.
+  - If the company is in DEVELOPMENT or CONSTRUCTION stage (feasibility complete, project financing arranged, or construction decision announced): do NOT calculate exploration runway — it is misleading. Instead, state total disclosed capex budget vs. total disclosed funding (cash + debt facilities + streaming proceeds + any other committed capital). Flag any funding gap. If construction is paused (permitting, security, or other reasons), state the estimated monthly holding cost (desktop/engineering work only) and how long current cash covers that rate.
 - Any significant debt or outstanding financial obligations?
 - Compare current cash on hand to the total initial capex required for each project. State the gap explicitly and flag if the company has no disclosed plan (debt facility, strategic partner, streaming deal) to finance the difference.
 
@@ -238,13 +239,28 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
     }
 
     # Labels to drop if the pattern appears anywhere in the label
+    # Note: \b word boundaries fail next to underscores (underscore is a word char),
+    # so use (?<![a-zA-Z]) / (?![a-zA-Z]) instead for labels like SEDAR_Proxy_English.
     SKIP_RE = [
-        re.compile(r"\bestma\b", re.IGNORECASE),
+        re.compile(r"(?<![a-zA-Z])estma(?![a-zA-Z])", re.IGNORECASE),
         re.compile(r"test[_\-]?pdf", re.IGNORECASE),
         re.compile(r"forced labour", re.IGNORECASE),
         re.compile(r"voluntary carbon", re.IGNORECASE),
         re.compile(r"supply chain", re.IGNORECASE),
+        re.compile(r"(?<![a-zA-Z])proxy(?![a-zA-Z])", re.IGNORECASE),
+        re.compile(r"(?<![a-zA-Z])vif(?![a-zA-Z])|voting instruction", re.IGNORECASE),
+        re.compile(r"request[\s_]form", re.IGNORECASE),
+        re.compile(r"notice[\s_]of[\s_](?:\w+[\s_])*meeting", re.IGNORECASE),
+        re.compile(r"sedar[_\s-]+notice", re.IGNORECASE),
+        re.compile(r"notice[\s_]of[\s_]availability", re.IGNORECASE),
     ]
+
+    # Financial docs older than 4 years: FS, MD&A, quarterly/annual financials
+    FINANCIAL_KEYWORDS_RE = re.compile(
+        r"\b(?:fs|mda|md&a|financial|financials|statements?|quarterly|interim)\b",
+        re.IGNORECASE,
+    )
+    YEAR_IN_LABEL_RE = re.compile(r"\b(20\d{2})\b")
 
     AIF_RE = re.compile(r"annual information form.*?(\d{4})", re.IGNORECASE)
     MIC_RE = re.compile(r"(management information circular|information circular).*?(\d{4})", re.IGNORECASE)
@@ -279,6 +295,14 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
 
     best_aif = best_by_year(AIF_RE, 1)
     best_mic = best_by_year(MIC_RE, 2)
+
+    # Generic FS/MD&A labels (e.g. "FS", "FS (2)", "MD&A (3)") — no date in label, check URL
+    GENERIC_FIN_RE = re.compile(
+        r"^(?:fs|md&a|mda|financial\s+reports?|financial\s+statements?)(?:\s*\(\d+\))?$",
+        re.IGNORECASE,
+    )
+    fin_counts = {"fs": 0, "mda": 0}
+    MAX_FIN_DOCS = 6
 
     press_releases = []  # (date, label, url)
     regular = {}
@@ -322,6 +346,22 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
             if int(m_esg.group(1)) >= today.year - 2:
                 regular[s] = url
             continue
+
+        # Financial docs older than 4 years: drop silently
+        if FINANCIAL_KEYWORDS_RE.search(s):
+            years = [int(y) for y in YEAR_IN_LABEL_RE.findall(s)]
+            if years and max(years) <= today.year - 4:
+                continue
+
+        # Generic FS/MD&A labels: check URL for year and cap at MAX_FIN_DOCS each
+        if GENERIC_FIN_RE.match(s):
+            url_years = [int(y) for y in YEAR_IN_LABEL_RE.findall(url)]
+            if url_years and max(url_years) < today.year - 3:
+                continue
+            bucket = "mda" if re.search(r"md&?a", s, re.IGNORECASE) else "fs"
+            if fin_counts[bucket] >= MAX_FIN_DOCS:
+                continue
+            fin_counts[bucket] += 1
 
         regular[s] = url
 
