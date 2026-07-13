@@ -40,6 +40,12 @@ def _get_supabase():
 
 
 def _extract_text(pdf_bytes: bytes) -> str:
+    # EDGAR files come as HTML — detect and handle them directly
+    sample = pdf_bytes[:500].lstrip()
+    if sample.startswith(b"<") or b"<!DOCTYPE" in sample[:100]:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(pdf_bytes, "html.parser")
+        return soup.get_text(separator="\n", strip=True)
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
@@ -260,7 +266,7 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
         r"\b(?:fs|mda|md&a|financial|financials|statements?|quarterly|interim)\b",
         re.IGNORECASE,
     )
-    YEAR_IN_LABEL_RE = re.compile(r"\b(20\d{2})\b")
+    YEAR_IN_LABEL_RE = re.compile(r"(20\d{2})")
 
     AIF_RE = re.compile(r"annual information form.*?(\d{4})", re.IGNORECASE)
     MIC_RE = re.compile(r"(management information circular|information circular).*?(\d{4})", re.IGNORECASE)
@@ -347,16 +353,17 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
                 regular[s] = url
             continue
 
-        # Financial docs older than 4 years: drop silently
-        if FINANCIAL_KEYWORDS_RE.search(s):
-            years = [int(y) for y in YEAR_IN_LABEL_RE.findall(s)]
-            if years and max(years) <= today.year - 4:
+        # General year filter: drop any doc with a year older than 2 years in its label.
+        # Exception: technical reports (NI 43-101) may be the only resource estimate available.
+        years_in_label = [int(y) for y in YEAR_IN_LABEL_RE.findall(s)]
+        if years_in_label and max(years_in_label) < today.year - 2:
+            if not re.search(r"technical[\s_]report|ni[\s_]*43[-\s]101", s, re.IGNORECASE):
                 continue
 
         # Generic FS/MD&A labels: check URL for year and cap at MAX_FIN_DOCS each
         if GENERIC_FIN_RE.match(s):
             url_years = [int(y) for y in YEAR_IN_LABEL_RE.findall(url)]
-            if url_years and max(url_years) < today.year - 3:
+            if url_years and max(url_years) < today.year - 2:
                 continue
             bucket = "mda" if re.search(r"md&?a", s, re.IGNORECASE) else "fs"
             if fin_counts[bucket] >= MAX_FIN_DOCS:
@@ -419,8 +426,9 @@ def _read_one_pdf(args):
         return label, None, str(e)
 
 
-def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=None, dynamic_companies: dict | None = None) -> str:
-    pdf_docs = _filter_docs(pdf_docs)
+def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=None, dynamic_companies: dict | None = None, skip_filter: bool = False) -> str:
+    if not skip_filter:
+        pdf_docs = _filter_docs(pdf_docs)
     total = len(pdf_docs)
     completed = 0
     raw_results = {}
@@ -450,8 +458,7 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
         seen_hashes.add(fingerprint)
         doc_texts.append(f"--- {label} ---\n{text}")
 
-    if not doc_texts:
-        raise ValueError(f"Could not read any documents for {company_name}")
+    no_docs = not doc_texts
 
     if on_progress:
         on_progress({"step": "scraping", "label": "Scraping company website...", "current": 1, "total": 1})
@@ -482,12 +489,23 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
     if on_progress:
         on_progress({"step": "generating", "label": "Generating overview with AI...", "current": 1, "total": 1})
 
+    no_docs_notice = ""
+    if no_docs:
+        no_docs_notice = (
+            "⚠️ IMPORTANT: No investor documents could be fetched automatically for this company "
+            "(financial statements, MD&A, AIF, technical reports). "
+            "The report below is based ONLY on the company website and recent news. "
+            "Financial figures, resource estimates, NPV/IRR, and cash position are NOT available. "
+            "Skip any section that requires document data — do not guess or fabricate numbers. "
+            "For a full report, the user should paste direct PDF links into the chat.\n\n"
+        )
+
     prompt = OVERVIEW_PROMPT.format(
         company_name=company_name,
         rag_context=rag_context,
         about_text=about_text or "Not available.",
         news_text=news_text,
-        doc_texts="\n\n".join(doc_texts),
+        doc_texts=no_docs_notice + ("\n\n".join(doc_texts) if doc_texts else "No documents available."),
     )
     # Save the full assembled prompt so other LLMs can be tested on identical input
     import pathlib
@@ -495,7 +513,19 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
         prompt, encoding="utf-8"
     )
     history = [{"role": "user", "parts": [{"text": prompt}]}]
-    return _call_gemini(history)
+    report = _call_gemini(history)
+
+    if no_docs:
+        report = (
+            "## ⚠️ Partial Report — Documents Not Available\n"
+            "We were unable to automatically fetch financial documents (AIF, financial statements, MD&A, technical reports) for this company. "
+            "This report is based on the company website and recent news only. "
+            "Financial figures, resource estimates, and NPV/IRR are not available.\n\n"
+            "**To get a full report:** paste direct PDF links (from the company website or SEDAR) into the chat.\n\n"
+            "---\n\n"
+        ) + report
+
+    return report
 
 
 def send_message_with_overview(message: str, overview_md: str, company_name: str, session_id: str | None) -> tuple[str, str]:

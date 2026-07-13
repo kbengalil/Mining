@@ -1,28 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const API = "http://127.0.0.1:8000";
 
-const STEPS = ["reading", "scraping", "news", "rag", "generating"];
-const STEP_LABELS = {
-  reading: "Reading documents",
-  scraping: "Scraping website",
-  news: "Fetching news",
-  rag: "Searching expert knowledge",
-  generating: "Generating report",
-};
-
-function formatTime(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
 
 const INITIAL_MESSAGE = { role: "bot", text: "Hello! I'm the Mining AI Analyst. Ask me anything about mining stocks, or paste a company's investor relations URL to run a full analysis." };
 
 export default function ChatPage() {
+  const router = useRouter();
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -53,73 +41,16 @@ export default function ChatPage() {
   useEffect(() => {
     fetch(`${API}/analyzed-companies`)
       .then((r) => r.json())
-      .then((data) => { if (Array.isArray(data)) setAnalyzedCompanies(data); })
+      .then((data) => { if (Array.isArray(data)) setAnalyzedCompanies([...data].sort()); })
       .catch(() => {});
   }, []);
 
   function clearChat() {
     setMessages([INITIAL_MESSAGE]);
     setSessionId(null);
-    setActiveJob(null);
-    setPdfs([]);
-    setSelectedPdfs([]);
-    setJobData(null);
-    setJobStatus(null);
-    clearInterval(pollRef.current);
-    clearInterval(timerRef.current);
     try { sessionStorage.removeItem("chat_messages"); sessionStorage.removeItem("chat_session_id"); } catch {}
   }
 
-  // Analysis panel state
-  const [activeJob, setActiveJob] = useState(null); // { jobId, companyName }
-  const [pdfs, setPdfs] = useState([]);
-  const [selectedPdfs, setSelectedPdfs] = useState([]);
-  const [jobData, setJobData] = useState(null);
-  const [jobStatus, setJobStatus] = useState(null); // "running" | "done" | "error"
-  const [elapsed, setElapsed] = useState(0);
-  const [finalTime, setFinalTime] = useState(null);
-  const pollRef = useRef(null);
-  const timerRef = useRef(null);
-  const startTimeRef = useRef(null);
-
-  // Cleanup on unmount
-  useEffect(() => () => { clearInterval(pollRef.current); clearInterval(timerRef.current); }, []);
-
-  function startPolling(jobId) {
-    clearInterval(pollRef.current);
-    clearInterval(timerRef.current);
-    setElapsed(0);
-    setFinalTime(null);
-    startTimeRef.current = Date.now();
-    timerRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
-    pollRef.current = setInterval(() => {
-      fetch(`${API}/overview-jobs/${jobId}`)
-        .then((r) => r.json())
-        .then((data) => {
-          setJobData(data);
-          if (data.pdfs) setPdfs((p) => p.length === 0 ? data.pdfs : p);
-          if (data.selected_pdfs) setSelectedPdfs((p) => p.length === 0 ? data.selected_pdfs : p);
-          if (data.status === "done") {
-            clearInterval(pollRef.current);
-            clearInterval(timerRef.current);
-            setFinalTime(Math.floor((Date.now() - startTimeRef.current) / 1000));
-            setJobStatus("done");
-          } else if (data.status === "error") {
-            clearInterval(pollRef.current);
-            clearInterval(timerRef.current);
-            setJobStatus("error");
-          } else if (data.status === "cancelled") {
-            clearInterval(pollRef.current);
-            clearInterval(timerRef.current);
-            setJobStatus("error");
-            setJobData((d) => ({ ...d, error: "Analysis stopped." }));
-          }
-        })
-        .catch(() => {});
-    }, 1000);
-  }
 
   async function send() {
     const text = input.trim();
@@ -146,15 +77,15 @@ export default function ChatPage() {
           reportLabel: data.company,
           generatedAt: data.generated_at,
         }]);
+      } else if (data.upload && data.company) {
+        // No cache — send user to upload panel
+        setAnalyzedCompanies((prev) => prev.includes(data.company) ? prev : [data.company, ...prev].sort());
+        setMessages((m) => [...m, { role: "bot", text: data.reply }]);
+        router.push(`/companies/${encodeURIComponent(data.company)}`);
       } else if (data.job_id && data.company) {
-        // No cache — analysis started, show left panel and start polling
-        setActiveJob({ jobId: data.job_id, companyName: data.company });
-        setPdfs([]);
-        setSelectedPdfs([]);
-        setJobData(null);
-        setJobStatus("running");
-        startPolling(data.job_id);
-        setMessages((m) => [...m, { role: "bot", text: `Starting analysis of **${data.company}**. Progress is shown on the left.` }]);
+        // Legacy auto-scan path (kept for backward compatibility)
+        setAnalyzedCompanies((prev) => prev.includes(data.company) ? prev : [data.company, ...prev].sort());
+        router.push(`/companies/${encodeURIComponent(data.company)}?job=${data.job_id}`);
       } else {
         setSessionId(data.session_id);
         setMessages((m) => [...m, { role: "bot", text: data.reply }]);
@@ -166,115 +97,10 @@ export default function ChatPage() {
     }
   }
 
-  const currentStepIndex = jobData ? STEPS.indexOf(jobData.step) : 0;
-
   return (
     <div className="flex h-screen">
 
-      {/* LEFT PANEL — analysis */}
-      <div className={`flex-shrink-0 border-r border-gray-100 overflow-y-auto transition-all duration-300 ${activeJob ? "w-80 p-6" : "w-0 overflow-hidden"}`}>
-        {activeJob && (
-          <>
-            <h2 className="font-semibold text-gray-800 mb-4 text-sm">{activeJob.companyName}</h2>
-
-            {/* PDF list */}
-            {pdfs.length > 0 && (
-              <div className="mb-6">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                  Documents ({pdfs.length})
-                  {selectedPdfs.length > 0 && (
-                    <span className="ml-1 text-green-600 normal-case font-normal">· {selectedPdfs.length} used</span>
-                  )}
-                </p>
-                <ul className="space-y-1">
-                  {pdfs.map((label, i) => {
-                    const isSelected = selectedPdfs.includes(label);
-                    return (
-                      <li key={i} className={`text-xs flex items-center gap-1.5 ${isSelected ? "text-gray-700" : "text-gray-400"}`}>
-                        <span className={isSelected ? "text-green-500 font-bold" : "text-gray-300"}>
-                          {isSelected ? "✓" : "—"}
-                        </span>
-                        {label}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
-
-            {/* Progress steps */}
-            {jobStatus === "running" && jobData && (
-              <div className="space-y-3 mb-4">
-                {STEPS.map((step, i) => {
-                  const done = i < currentStepIndex;
-                  const active = i === currentStepIndex;
-                  return (
-                    <div key={step} className="flex items-start gap-2">
-                      <div className={`mt-0.5 w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${
-                        done ? "bg-green-500" : active ? "bg-blue-500 animate-pulse" : "bg-gray-200"
-                      }`}>
-                        {done && <span className="text-white text-xs">✓</span>}
-                      </div>
-                      <div className="flex-1">
-                        <p className={`text-xs font-medium ${active ? "text-gray-900" : done ? "text-gray-400" : "text-gray-300"}`}>
-                          {STEP_LABELS[step]}
-                          {step === "reading" && active && jobData && ` ${jobData.current}/${jobData.total}`}
-                        </p>
-                        {step === "reading" && active && jobData && (
-                          <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                              style={{ width: `${(jobData.current / jobData.total) * 100}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {jobStatus === "running" && (
-              <div className="flex items-center gap-3 mt-1">
-                <p className="text-xs text-gray-400 font-mono">{formatTime(elapsed)}</p>
-                <button
-                  onClick={() => {
-                    const id = activeJob?.jobId;
-                    if (!id) return;
-                    fetch(`${API}/overview-jobs/${id}/cancel`, { method: "POST" }).catch(() => {});
-                    clearInterval(pollRef.current);
-                    clearInterval(timerRef.current);
-                    setJobStatus("error");
-                    setJobData((d) => ({ ...d, error: "Analysis stopped." }));
-                  }}
-                  className="text-xs px-2 py-1 border border-red-200 rounded text-red-500 hover:bg-red-50 transition-colors"
-                >
-                  ⏹ Stop
-                </button>
-              </div>
-            )}
-
-            {jobStatus === "done" && (
-              <div className="mt-2 space-y-2">
-                <p className="text-xs text-green-600 font-medium">✓ Done in {formatTime(finalTime)}</p>
-                <Link
-                  href={`/companies/${encodeURIComponent(activeJob.companyName)}`}
-                  className="block text-center text-sm px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                >
-                  View Report →
-                </Link>
-              </div>
-            )}
-
-            {jobStatus === "error" && (
-              <p className="text-xs text-red-600">Error: {jobData?.error || "Something went wrong"}</p>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* RIGHT PANEL — chat */}
+      {/* CHAT PANEL */}
       <main className="flex flex-col flex-1 max-w-2xl mx-auto p-4 min-w-0">
         {/* Header */}
         <div className="flex items-center gap-3 py-3 border-b border-gray-100 mb-4">
@@ -347,7 +173,7 @@ export default function ChatPage() {
       {analyzedCompanies.length > 0 && (
         <div className="flex-shrink-0 w-44 p-4 pt-6 flex flex-col gap-2 border-l border-gray-100">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Reports</p>
-          {analyzedCompanies.map((name) => (
+          {analyzedCompanies.filter(n => !n.startsWith("_")).sort().map((name) => (
             <Link
               key={name}
               href={`/companies/${encodeURIComponent(name)}`}
@@ -356,6 +182,20 @@ export default function ChatPage() {
               {name} →
             </Link>
           ))}
+          {analyzedCompanies.some(n => n.startsWith("_")) && (
+            <>
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wide mt-3 mb-1">Archived</p>
+              {analyzedCompanies.filter(n => n.startsWith("_")).sort().map((name) => (
+                <Link
+                  key={name}
+                  href={`/companies/${encodeURIComponent(name)}`}
+                  className="text-xs px-3 py-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200 transition-colors text-left"
+                >
+                  {name.replace(/^_/, "")} →
+                </Link>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>

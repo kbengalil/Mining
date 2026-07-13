@@ -50,15 +50,30 @@ def list_companies():
 @app.get("/analyzed-companies")
 def analyzed_companies():
     rows = supabase.table("company_overviews").select("company_name, generated_at").order("generated_at", desc=True).execute()
-    return [r["company_name"] for r in (rows.data or [])]
+    completed = [r["company_name"] for r in (rows.data or [])]
+    # Prepend actively-running companies so they appear in the sidebar during analysis
+    active = [name for name in active_jobs_by_company if name not in completed]
+    return active + completed
 
 
 @app.get("/companies/{company_name}/overview")
 def get_cached_overview(company_name: str):
+    from urllib.parse import unquote
     row = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
     if not row.data:
         raise HTTPException(status_code=404, detail="No cached report")
-    return row.data[0]
+    data = row.data[0]
+    # Compute which URLs were actually selected (fed to Gemini) by re-running the filter
+    source_urls = data.get("source_urls") or []
+    pdf_docs = {}
+    for url in source_urls:
+        label = unquote(url.split("/")[-1].split("?")[0])
+        if label.lower().endswith(".pdf"):
+            label = label[:-4]
+        if label:
+            pdf_docs[label] = url
+    data["selected_urls"] = list(_filter_docs(pdf_docs).values())
+    return data
 
 
 @app.get("/companies/{company_name}/documents")
@@ -128,6 +143,7 @@ def job_download(job_id: str):
 
 
 overview_jobs: dict[str, dict] = {}
+active_jobs_by_company: dict[str, str] = {}  # company_name -> job_id for running jobs
 dynamic_companies: dict[str, dict] = {}  # populated at runtime via chat intent
 
 
@@ -148,7 +164,7 @@ def _save_overview(company_name: str, overview_md: str, current_urls: list[str])
         }).execute()
 
 
-def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_urls: list[str], crawl_url: str | None = None):
+def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_urls: list[str], crawl_url: str | None = None, skip_filter: bool = False):
     job = overview_jobs[job_id]
 
     def on_progress(info: dict):
@@ -166,6 +182,7 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
                 job["pdfs"] = list(pdf_docs.keys())
                 job["pdf_urls"] = dict(pdf_docs)
                 job["total"] = len(pdf_docs)
+                job["selected_pdfs"] = list(_filter_docs(pdf_docs).keys())
             else:
                 job["status"] = "error"
                 job["error"] = "Could not find investor documents for this company."
@@ -174,13 +191,15 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
         if job.get("status") == "cancelled":
             return
 
-        overview_md = generate_overview(company_name, pdf_docs, on_progress, dynamic_companies)
+        overview_md = generate_overview(company_name, pdf_docs, on_progress, dynamic_companies, skip_filter=skip_filter)
         _save_overview(company_name, overview_md, current_urls)
         job["status"] = "done"
         job["overview_markdown"] = overview_md
     except Exception as e:
         job["status"] = "error"
         job["error"] = str(e)
+    finally:
+        active_jobs_by_company.pop(company_name, None)
 
 
 @app.post("/companies/{company_name}/overview/start")
@@ -236,8 +255,36 @@ def start_overview(company_name: str, background_tasks: BackgroundTasks, force: 
         "selected_pdfs": selected_pdfs,
         "pdf_urls": pdf_docs,
     }
+    active_jobs_by_company[company_name] = job_id
     background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, crawl_url)
     return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": selected_pdfs, "pdf_urls": pdf_docs, "cached": False}
+
+
+class ManualDocsRequest(BaseModel):
+    docs: dict[str, str]  # label -> url
+    company_url: str | None = None  # optional: registers unknown company for news/website scraping
+
+
+@app.post("/companies/{company_name}/overview/start-manual")
+def start_overview_manual(company_name: str, body: ManualDocsRequest, background_tasks: BackgroundTasks):
+    # Register company for news/website scraping if not already known
+    if company_name not in {**COMPANIES, **dynamic_companies} and body.company_url:
+        dynamic_companies[company_name] = {
+            "base_url": body.company_url.rstrip("/"),
+            "investor_pages": [], "about_pages": [], "news_page": "/news/",
+        }
+    pdf_docs = {label: url for label, url in body.docs.items() if url.strip()}
+    current_urls = sorted(pdf_docs.values())
+    pdf_list = list(pdf_docs.keys())
+    job_id = str(uuid.uuid4())
+    overview_jobs[job_id] = {
+        "status": "running", "step": "reading", "label": "Starting...",
+        "current": 0, "total": len(pdf_docs),
+        "pdfs": pdf_list, "selected_pdfs": pdf_list, "pdf_urls": pdf_docs,
+    }
+    active_jobs_by_company[company_name] = job_id
+    background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, None, True)
+    return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": pdf_list, "pdf_urls": pdf_docs}
 
 
 @app.delete("/companies/{company_name}/overview")
@@ -277,6 +324,14 @@ def archive_overview(company_name: str):
         "generated_at": existing["generated_at"],
     }).execute()
     return {"archived_as": archived_name}
+
+
+@app.get("/companies/{company_name}/active-job")
+def get_active_job(company_name: str):
+    job_id = active_jobs_by_company.get(company_name)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="No active job")
+    return {"job_id": job_id}
 
 
 @app.get("/overview-jobs/{job_id}")
@@ -352,41 +407,23 @@ def chat(payload: ChatRequest, background_tasks: BackgroundTasks):
         all_companies = {**COMPANIES, **dynamic_companies}
         if company_name not in all_companies:
             if not provided_url:
-                reply = f"I couldn't find investor information for **{company_name}**. Please paste the company's investor relations URL."
-                return {"reply": reply, "session_id": payload.session_id}
-            # Register a placeholder so the job can start immediately
+                # Unknown company, no URL — send to upload panel so user can provide URL + docs
+                encoded = company_name.replace(" ", "%20")
+                reply = (
+                    f"I found **{company_name}**. Please upload the company's documents to generate a report.\n\n"
+                    f"[Open upload panel →](/companies/{encoded})"
+                )
+                return {"reply": reply, "session_id": payload.session_id, "company": company_name, "upload": True}
+            # Register placeholder with provided URL
             dynamic_companies[company_name] = {"base_url": provided_url.rstrip("/"), "investor_pages": [], "about_pages": [], "news_page": "/news/"}
-            all_companies = {**COMPANIES, **dynamic_companies}
 
-        # No cache — start overview job in background (crawl happens inside the job)
-        company_info = all_companies[company_name]
-        base_url = company_info.get("base_url", provided_url or "")
-        needs_crawl = not company_info.get("investor_pages") and provided_url
-        if needs_crawl:
-            pdf_docs = {}
-            current_urls = []
-            selected_pdfs = []
-        else:
-            result = find_pdf_links(company_name, dynamic_companies)
-            pdf_docs = result["documents"]
-            current_urls = sorted(pdf_docs.values())
-            selected_pdfs = list(_filter_docs(pdf_docs).keys())
-        job_id = str(uuid.uuid4())
-        overview_jobs[job_id] = {
-            "status": "running", "step": "reading", "label": "Starting...",
-            "current": 0, "total": len(pdf_docs), "pdfs": list(pdf_docs.keys()),
-            "selected_pdfs": selected_pdfs, "pdf_urls": dict(pdf_docs),
-        }
-        background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, provided_url if needs_crawl else None)
+        # No cache — redirect to upload panel (user provides docs manually)
         encoded = company_name.replace(" ", "%20")
         reply = (
-            f"Starting analysis of **{company_name}**. "
-            f"Website: {base_url}\n\n"
-            f"Found {len(pdf_docs)} documents ({len(selected_pdfs)} selected for analysis). "
-            f"This will take 3-4 minutes.\n\n"
-            f"[View live progress here](/companies/{encoded}?job={job_id})"
+            f"I found **{company_name}**. Please upload the relevant documents to generate a full report.\n\n"
+            f"[Open upload panel →](/companies/{encoded})"
         )
-        return {"reply": reply, "session_id": payload.session_id, "job_id": job_id, "company": company_name}
+        return {"reply": reply, "session_id": payload.session_id, "company": company_name, "upload": True}
 
     try:
         reply, session_id = send_message(payload.message, payload.documents, payload.session_id)

@@ -77,8 +77,13 @@ def _crawl_for_pdfs(start_url: str) -> dict:
             r = requests.get(url, headers=HEADERS, timeout=15, verify=False)
             r.raise_for_status()
             html = r.text
-            # If the page has almost no content it's likely JS-rendered — try Playwright
-            if html.count("<a ") < 5:
+            # If the page has almost no content, is JS-rendered, or is a bot-check page — try Playwright
+            _bot_check = any(phrase in html for phrase in [
+                "One moment, please", "Please wait while your request is being verified",
+                "Checking your browser", "cf-browser-verification", "Just a moment",
+                "Enable JavaScript and cookies",
+            ])
+            if html.count("<a ") < 5 or _bot_check:
                 return _get_page_html(url)
             return html
         except Exception:
@@ -529,8 +534,14 @@ def find_pdf_links(company_name: str, dynamic_companies: dict | None = None) -> 
     all_companies = {**COMPANIES, **(dynamic_companies or {})}
     company = all_companies[company_name]
     base_url = company["base_url"]
-    pdf_links = {}
     page_errors = []
+
+    # Try EDGAR first — reliable, no bot protection for US-listed companies
+    pdf_links = fetch_edgar_docs(company_name)
+    if pdf_links:
+        print(f"  [EDGAR] Using {len(pdf_links)} EDGAR documents — skipping website scrape")
+        return {"documents": pdf_links, "errors": []}
+    print(f"  [EDGAR] Not found on EDGAR — falling back to website scrape")
 
     for page_path in company["investor_pages"]:
         if ".pdf" in page_path.lower():
@@ -558,6 +569,8 @@ def sanitize_filename(label: str) -> str:
 
 def scrape_about_pages(company_name: str, dynamic_companies: dict | None = None) -> str:
     all_companies = {**COMPANIES, **(dynamic_companies or {})}
+    if company_name not in all_companies:
+        return ""
     company = all_companies[company_name]
     base_url = company["base_url"]
     texts = []
@@ -581,6 +594,8 @@ def scrape_about_pages(company_name: str, dynamic_companies: dict | None = None)
 
 def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10, dynamic_companies: dict | None = None) -> list[dict]:
     all_companies = {**COMPANIES, **(dynamic_companies or {})}
+    if company_name not in all_companies:
+        return []
     company = all_companies[company_name]
     news_path = company.get("news_page")
     if not news_path:
@@ -648,6 +663,134 @@ def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10, dyna
 
 
 def fetch_pdf_bytes(url: str) -> bytes:
-    response = requests.get(url, headers=HEADERS, timeout=30)
+    edgar_headers = {"User-Agent": "MiningAI kbengalil@gmail.com", "Accept-Encoding": "gzip, deflate"}
+    headers = edgar_headers if "sec.gov" in url else HEADERS
+    response = requests.get(url, headers=headers, timeout=30)
     response.raise_for_status()
     return response.content
+
+
+# ---------------------------------------------------------------------------
+# EDGAR integration (SEC EDGAR for US-listed companies)
+# ---------------------------------------------------------------------------
+_EDGAR_HEADERS = {"User-Agent": "MiningAI kbengalil@gmail.com", "Accept-Encoding": "gzip, deflate"}
+_EDGAR_BASE = "https://www.sec.gov"
+_EDGAR_DATA = "https://data.sec.gov"
+_EDGAR_SEARCH = "https://efts.sec.gov/LATEST/search-index"
+
+# Form types we want from EDGAR, in priority order
+_EDGAR_ANNUAL_FORMS = {"40-F", "20-F", "10-K", "40FR12B"}
+_EDGAR_QUARTERLY_FORMS = {"6-K", "10-Q"}
+
+# Exhibit file patterns we want (skip XBRL R*.htm and the wrapper form file)
+_EDGAR_EXHIBIT_RE = re.compile(r"exhibit\d*99[-_]?\d*\.htm$|ex\d+[-_]\d+\.htm$|ex99[-_]?\d*\.htm$", re.IGNORECASE)
+
+
+def _edgar_find_cik(company_name: str) -> str | None:
+    """Search EDGAR full-text for the company and extract its CIK."""
+    try:
+        r = requests.get(
+            _EDGAR_SEARCH,
+            params={"q": f'"{company_name}"', "forms": "40-F,20-F,10-K,6-K,F-10"},
+            headers=_EDGAR_HEADERS,
+            timeout=15,
+        )
+        if not r.ok:
+            return None
+        hits = r.json().get("hits", {}).get("hits", [])
+        # Only accept a hit where the FILER name matches our company (not just a mention)
+        search_words = set(company_name.lower().split())
+        for hit in hits:
+            names = hit["_source"].get("display_names", [])
+            for name in names:
+                # Format: "Company Name  (TICKER)  (CIK 0001234567)"
+                m = re.search(r"CIK\s+(\d+)", name)
+                if not m:
+                    continue
+                filer_name = name.split("(")[0].strip().lower()
+                filer_words = set(filer_name.split())
+                # Require majority of search words to appear in filer name
+                if len(search_words & filer_words) >= max(1, len(search_words) - 1):
+                    return m.group(1).zfill(10)
+    except Exception as e:
+        print(f"  [EDGAR CIK lookup failed] {e}")
+    return None
+
+
+def _edgar_get_exhibit_urls(cik: str, accession: str) -> list[tuple[str, str]]:
+    """Return [(label, url)] for exhibit99 HTM files inside a filing."""
+    acc_nodash = accession.replace("-", "")
+    cik_int = str(int(cik))
+    index_url = f"{_EDGAR_BASE}/Archives/edgar/data/{cik_int}/{acc_nodash}/"
+    try:
+        r = requests.get(index_url, headers=_EDGAR_HEADERS, timeout=20)
+        if not r.ok:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            filename = href.split("/")[-1]
+            if _EDGAR_EXHIBIT_RE.match(filename):
+                full_url = f"{_EDGAR_BASE}{href}" if href.startswith("/") else href
+                label = filename.replace(".htm", "").replace("-", " ").replace("_", " ")
+                results.append((label, full_url))
+        # Sort numerically by the trailing exhibit number (e.g. exhibit99-2 before exhibit99-10)
+        def _exhibit_num(item):
+            m = re.search(r"(\d+)$", item[0])
+            return int(m.group(1)) if m else 999
+        results.sort(key=_exhibit_num)
+        return results
+    except Exception as e:
+        print(f"  [EDGAR exhibit lookup failed] {accession}: {e}")
+        return []
+
+
+def fetch_edgar_docs(company_name: str) -> dict:
+    """
+    Search EDGAR for company, return {label: url} of key annual + quarterly exhibit HTMs.
+    Returns empty dict if company not found or no relevant filings.
+    """
+    print(f"[EDGAR] Searching for: {company_name}")
+    cik = _edgar_find_cik(company_name)
+    if not cik:
+        print(f"  [EDGAR] Company not found")
+        return {}
+
+    print(f"  [EDGAR] CIK: {cik}")
+    try:
+        r = requests.get(f"{_EDGAR_DATA}/submissions/CIK{cik}.json", headers=_EDGAR_HEADERS, timeout=20)
+        if not r.ok:
+            return {}
+        data = r.json()
+        filings = data["filings"]["recent"]
+    except Exception as e:
+        print(f"  [EDGAR] Submissions fetch failed: {e}")
+        return {}
+
+    forms = filings["form"]
+    dates = filings["filingDate"]
+    accessions = filings["accessionNumber"]
+
+    docs = {}
+    annual_found = 0
+    quarterly_found = 0
+
+    for i, form in enumerate(forms):
+        if annual_found >= 1 and quarterly_found >= 2:
+            break
+        if form in _EDGAR_ANNUAL_FORMS and annual_found < 1:
+            print(f"  [EDGAR] Annual {form}: {dates[i]}")
+            exhibits = _edgar_get_exhibit_urls(cik, accessions[i])[:4]  # AIF, FS, MD&A, tech report
+            for label, url in exhibits:
+                docs[f"{form} {dates[i]} {label}"] = url
+            annual_found += 1
+        elif form in _EDGAR_QUARTERLY_FORMS and quarterly_found < 2:
+            print(f"  [EDGAR] Quarterly {form}: {dates[i]}")
+            exhibits = _edgar_get_exhibit_urls(cik, accessions[i])[:2]  # FS + MD&A only
+            for label, url in exhibits:
+                docs[f"{form} {dates[i]} {label}"] = url
+            quarterly_found += 1
+
+    print(f"  [EDGAR] Found {len(docs)} exhibit documents")
+    return docs

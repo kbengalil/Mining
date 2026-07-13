@@ -13,6 +13,15 @@ function formatTime(seconds) {
 }
 
 const STEPS = ["reading", "scraping", "news", "rag", "generating"];
+
+const UPLOAD_DOCS = [
+  { key: "Financial Statements",          label: "Financial Statements (FS)" },
+  { key: "MD&A",                          label: "MD&A" },
+  { key: "Management Information Circular", label: "Management Information Circular" },
+  { key: "Annual Information Form",       label: "Annual Information Form (AIF)" },
+  { key: "NI 43-101 Technical Report",    label: "NI 43-101 Technical Report" },
+  { key: "Corporate Presentation",        label: "Corporate Presentation" },
+];
 const STEP_LABELS = {
   reading: "Reading documents",
   scraping: "Scraping company website",
@@ -32,7 +41,11 @@ export default function CompanyPage() {
   const [pdfUrls, setPdfUrls] = useState({});
   const [job, setJob] = useState(null);
   const [overview, setOverview] = useState(null);
-  const [status, setStatus] = useState("starting"); // starting | running | done | error | cached
+  const [status, setStatus] = useState("starting"); // starting | upload | running | done | error | cached
+  const [uploadUrls, setUploadUrls] = useState(() =>
+    Object.fromEntries(UPLOAD_DOCS.map((d) => [d.key, ""]))
+  );
+  const [companyWebsiteUrl, setCompanyWebsiteUrl] = useState("");
   const [error, setError] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [finalTime, setFinalTime] = useState(null);
@@ -110,14 +123,40 @@ export default function CompanyPage() {
             }
             setStatus("cached");
           } else {
-            startAnalysis();
+            setStatus("upload");
           }
         })
-        .catch(() => startAnalysis());
+        .catch(() => setStatus("upload"));
   }
 
   function startAnalysis() {
     fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start?force=true`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        setPdfs(data.pdfs || []);
+        setSelectedPdfs(data.selected_pdfs || []);
+        if (data.pdf_urls) setPdfUrls(data.pdf_urls);
+        jobIdRef.current = data.job_id;
+        setStatus("running");
+        startTimeRef.current = Date.now();
+        sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
+        timerRef.current = setInterval(() => {
+          setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+        }, 1000);
+        pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
+      })
+      .catch((e) => { setError(e.message); setStatus("error"); });
+  }
+
+  function startManualAnalysis() {
+    const docs = Object.fromEntries(
+      Object.entries(uploadUrls).filter(([, url]) => url.trim())
+    );
+    fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start-manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ docs, company_url: companyWebsiteUrl.trim() || null }),
+    })
       .then((r) => r.json())
       .then((data) => {
         setPdfs(data.pdfs || []);
@@ -222,7 +261,7 @@ export default function CompanyPage() {
               📦 Archive
             </button>
           )}
-          {(status === "cached" || status === "done") && (
+          {status !== "running" && status !== "starting" && (
             <button
               onClick={() => {
                 if (!confirm(`Delete report for ${companyName}?`)) return;
@@ -330,6 +369,58 @@ export default function CompanyPage() {
 
       {status === "starting" && (
         <p className="text-sm text-gray-400 mb-8">Finding documents...</p>
+      )}
+
+      {/* Manual document upload panel */}
+      {status === "upload" && (
+        <div className="mb-8">
+          <p className="text-sm text-gray-600 mb-1 font-medium">
+            Paste PDF links from {companyName}&apos;s investor relations page.
+          </p>
+          <p className="text-xs text-gray-400 mb-5">
+            All fields are optional — leave blank to skip. News and website info are fetched automatically.
+          </p>
+          <div className="space-y-3 mb-6">
+            <div className="flex items-center gap-3 pb-3 mb-1 border-b border-gray-100">
+              <label className="text-sm text-gray-500 w-56 flex-shrink-0">Company website URL</label>
+              <input
+                type="url"
+                placeholder="https://sunpeakmetals.com (optional — for news & about page)"
+                value={companyWebsiteUrl}
+                onChange={(e) => setCompanyWebsiteUrl(e.target.value)}
+                className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </div>
+            {UPLOAD_DOCS.map(({ key, label }) => (
+              <div key={key} className="flex items-center gap-3">
+                <label className="text-sm text-gray-600 w-56 flex-shrink-0">{label}</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={uploadUrls[key]}
+                  onChange={(e) =>
+                    setUploadUrls((prev) => ({ ...prev, [key]: e.target.value }))
+                  }
+                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={startManualAnalysis}
+              className="text-sm px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Generate Report
+            </button>
+            <button
+              onClick={startAnalysis}
+              className="text-sm px-5 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
+            >
+              Skip — auto-scan instead
+            </button>
+          </div>
+        </div>
       )}
 
       {status === "running" && (

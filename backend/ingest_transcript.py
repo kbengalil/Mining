@@ -152,6 +152,7 @@ def main():
             "title": chunk["title"],
             "content": chunk["content"],
             "source_url": youtube_url,
+            "speaker": speaker,
             "embedding": vector,
         }).execute()
 
