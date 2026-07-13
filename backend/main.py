@@ -290,6 +290,8 @@ def start_overview_manual(company_name: str, body: ManualDocsRequest, background
 @app.delete("/companies/{company_name}/overview")
 def delete_overview(company_name: str):
     supabase.table("company_overviews").delete().eq("company_name", company_name).execute()
+    active_jobs_by_company.pop(company_name, None)
+    dynamic_companies.pop(company_name, None)
     return {"deleted": company_name}
 
 
@@ -323,6 +325,9 @@ def archive_overview(company_name: str):
         "source_urls": existing["source_urls"],
         "generated_at": existing["generated_at"],
     }).execute()
+    supabase.table("company_overviews").delete().eq("company_name", company_name).execute()
+    active_jobs_by_company.pop(company_name, None)
+    dynamic_companies.pop(company_name, None)
     return {"archived_as": archived_name}
 
 

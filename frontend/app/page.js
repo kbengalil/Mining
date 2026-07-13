@@ -174,13 +174,27 @@ export default function ChatPage() {
         <div className="flex-shrink-0 w-44 p-4 pt-6 flex flex-col gap-2 border-l border-gray-100">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Reports</p>
           {analyzedCompanies.filter(n => !n.startsWith("_")).sort().map((name) => (
-            <Link
-              key={name}
-              href={`/companies/${encodeURIComponent(name)}`}
-              className="text-xs px-3 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors text-left"
-            >
-              {name} →
-            </Link>
+            <div key={name} className="flex items-center gap-1">
+              <Link
+                href={`/companies/${encodeURIComponent(name)}`}
+                className="flex-1 text-xs px-3 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors text-left"
+              >
+                {name} →
+              </Link>
+              <button
+                title="Archive"
+                onClick={async () => {
+                  const r = await fetch(`${API}/companies/${encodeURIComponent(name)}/overview/archive`, { method: "POST" });
+                  if (r.ok) {
+                    const d = await r.json();
+                    setAnalyzedCompanies(prev => prev.filter(n2 => n2 !== name).concat(d.archived_as).sort());
+                  }
+                }}
+                className="text-xs px-1.5 py-2 bg-gray-800 text-gray-400 rounded-lg hover:bg-gray-600 transition-colors flex-shrink-0"
+              >
+                📦
+              </button>
+            </div>
           ))}
           {analyzedCompanies.some(n => n.startsWith("_")) && (
             <>

@@ -15,12 +15,12 @@ function formatTime(seconds) {
 const STEPS = ["reading", "scraping", "news", "rag", "generating"];
 
 const UPLOAD_DOCS = [
-  { key: "Financial Statements",          label: "Financial Statements (FS)" },
-  { key: "MD&A",                          label: "MD&A" },
-  { key: "Management Information Circular", label: "Management Information Circular" },
-  { key: "Annual Information Form",       label: "Annual Information Form (AIF)" },
-  { key: "NI 43-101 Technical Report",    label: "NI 43-101 Technical Report" },
-  { key: "Corporate Presentation",        label: "Corporate Presentation" },
+  { key: "Corporate Presentation",          label: "Corporate Presentation",          sedar: false, edgar: false, tip: "Investor pitch deck. Usually under Investors → Corporate Presentation on the company website. Click the download icon (↓) in the PDF viewer to get the direct link." },
+  { key: "Management Information Circular", label: "Management Information Circular", sedar: true,  edgar: false, tip: "Annual proxy circular with executive compensation, board details, and AGM voting matters. Usually under Investors → AGM Materials or on SEDAR+." },
+  { key: "Financial Statements",            label: "Financial Statements (FS)",       sedar: true,  edgar: true,  tip: "Quarterly or annual financial statements (balance sheet, income statement, cash flows). Found under Investors → Financials — use the most recent quarter's FS link." },
+  { key: "MD&A",                            label: "MD&A",                            sedar: true,  edgar: true,  tip: "Management's Discussion & Analysis — accompanies the financial statements. Found in the same Financials section, next to the FS link for the most recent quarter." },
+  { key: "Annual Information Form",         label: "Annual Information Form (AIF)",   sedar: true,  edgar: false, tip: "Comprehensive annual regulatory filing covering properties, risks, and company structure. Filed on SEDAR+ — search the company name and filter by Annual information form." },
+  { key: "NI 43-101 Technical Report",      label: "NI 43-101 Technical Report",      sedar: true,  edgar: false, tip: "Mineral resource estimate by a Qualified Person. Only exists once a company has enough drill data. Check the Projects or Technical Reports section on their website, or SEDAR+. Early-stage explorers may not have one — leave blank." },
 ];
 const STEP_LABELS = {
   reading: "Reading documents",
@@ -155,7 +155,7 @@ export default function CompanyPage() {
     fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start-manual`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ docs, company_url: companyWebsiteUrl.trim() || null }),
+      body: JSON.stringify({ docs, company_url: null }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -266,7 +266,8 @@ export default function CompanyPage() {
               onClick={() => {
                 if (!confirm(`Delete report for ${companyName}?`)) return;
                 fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`, { method: "DELETE" })
-                  .then(() => window.location.href = "/");
+                  .then((r) => { if (r.ok) window.location.href = "/"; else alert("Delete failed"); })
+                  .catch(() => alert("Delete failed"));
               }}
               className="text-sm px-4 py-2 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
             >
@@ -381,30 +382,48 @@ export default function CompanyPage() {
             All fields are optional — leave blank to skip. News and website info are fetched automatically.
           </p>
           <div className="space-y-3 mb-6">
-            <div className="flex items-center gap-3 pb-3 mb-1 border-b border-gray-100">
-              <label className="text-sm text-gray-500 w-56 flex-shrink-0">Company website URL</label>
-              <input
-                type="url"
-                placeholder="https://sunpeakmetals.com (optional — for news & about page)"
-                value={companyWebsiteUrl}
-                onChange={(e) => setCompanyWebsiteUrl(e.target.value)}
-                className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              />
-            </div>
-            {UPLOAD_DOCS.map(({ key, label }) => (
-              <div key={key} className="flex items-center gap-3">
-                <label className="text-sm text-gray-600 w-56 flex-shrink-0">{label}</label>
-                <input
-                  type="url"
-                  placeholder="https://..."
-                  value={uploadUrls[key]}
-                  onChange={(e) =>
-                    setUploadUrls((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
-              </div>
-            ))}
+            {UPLOAD_DOCS.map(({ key, label, tip, sedar, edgar }, idx) => {
+              const sedarUrl = `https://www.sedarplus.ca/csa-party/records/search.html`;
+              const edgarUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=${encodeURIComponent(companyName)}&CIK=&type=&dateb=&owner=include&count=40&search_text=`;
+              return (
+                <div key={key} className="flex items-center gap-3">
+                  <div className="flex items-center gap-1 w-56 flex-shrink-0">
+                    <span className="text-xs text-gray-400 w-4 flex-shrink-0">{idx + 1}.</span>
+                    <label className="text-sm text-gray-600">{label}</label>
+                    <div className="relative group">
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-xs cursor-default leading-none">?</span>
+                      <div className="absolute left-5 top-0 z-20 w-72 p-2.5 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg">
+                        {tip}
+                      </div>
+                    </div>
+                  </div>
+                  <input
+                    type="url"
+                    placeholder="https://..."
+                    value={uploadUrls[key]}
+                    onChange={(e) =>
+                      setUploadUrls((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                    className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                  <div className="flex gap-1 flex-shrink-0">
+                    {sedar && (
+                      <a href={sedarUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors whitespace-nowrap">
+                        SEDAR+
+                      </a>
+                    )}
+                    {edgar && (
+                      <a href={edgarUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded hover:bg-gray-200 transition-colors whitespace-nowrap">
+                        EDGAR
+                      </a>
+                    )}
+                    {!sedar && !edgar && <div className="w-16" />}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           <div className="flex gap-3">
             <button
