@@ -3,3 +3,5 @@ __pycache__/
 venv/
 .venv/
 .env
+mining_docs_research.md
+new_architecture_plan.md

@@ -22,7 +22,8 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 from agent import generate_overview, send_message, send_message_with_overview, _filter_docs, detect_company_intent  # noqa: E402
-from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename, discover_company, identify_company_from_url
+from extractor import run_extraction
+from scraping import COMPANIES, fetch_pdf_bytes, find_pdf_links, sanitize_filename, discover_company, identify_company_from_url, discover_news_release_pdfs
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SECRET_KEY"])
 
@@ -67,9 +68,8 @@ def get_cached_overview(company_name: str):
     source_urls = data.get("source_urls") or []
     pdf_docs = {}
     for url in source_urls:
-        label = unquote(url.split("/")[-1].split("?")[0])
-        if label.lower().endswith(".pdf"):
-            label = label[:-4]
+        raw = unquote(url.split("/")[-1])  # keep query string so SEDAR ids stay unique
+        label = raw[:-4] if raw.lower().endswith(".pdf") else raw
         if label:
             pdf_docs[label] = url
     data["selected_urls"] = list(_filter_docs(pdf_docs).values())
@@ -149,19 +149,18 @@ dynamic_companies: dict[str, dict] = {}  # populated at runtime via chat intent
 
 def _save_overview(company_name: str, overview_md: str, current_urls: list[str]):
     now = datetime.now(timezone.utc).isoformat()
+    company_url = dynamic_companies.get(company_name, {}).get("base_url") or None
     existing = supabase.table("company_overviews").select("id").eq("company_name", company_name).limit(1).execute()
     if existing.data:
-        supabase.table("company_overviews").update({
-            "overview_markdown": overview_md,
-            "source_urls": current_urls,
-            "generated_at": now,
-        }).eq("company_name", company_name).execute()
+        update_data = {"overview_markdown": overview_md, "source_urls": current_urls, "generated_at": now}
+        if company_url:
+            update_data["company_url"] = company_url
+        supabase.table("company_overviews").update(update_data).eq("company_name", company_name).execute()
     else:
-        supabase.table("company_overviews").insert({
-            "company_name": company_name,
-            "overview_markdown": overview_md,
-            "source_urls": current_urls,
-        }).execute()
+        insert_data = {"company_name": company_name, "overview_markdown": overview_md, "source_urls": current_urls}
+        if company_url:
+            insert_data["company_url"] = company_url
+        supabase.table("company_overviews").insert(insert_data).execute()
 
 
 def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_urls: list[str], crawl_url: str | None = None, skip_filter: bool = False):
@@ -191,8 +190,30 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
         if job.get("status") == "cancelled":
             return
 
+        # For manual runs (skip_filter=True), auto-discover press release PDFs from the news page
+        # and merge them in so Recent Developments gets full press release detail.
+        if skip_filter:
+            job["label"] = "Fetching recent press releases..."
+            news_pdfs = discover_news_release_pdfs(company_name, dynamic_companies)
+            added = 0
+            for label, url in news_pdfs.items():
+                if url not in pdf_docs.values():
+                    pdf_docs[label] = url
+                    added += 1
+            if added:
+                job["pdfs"] = list(pdf_docs.keys())
+                job["pdf_urls"] = dict(pdf_docs)
+                job["total"] = len(pdf_docs)
+                print(f"  [News PDFs] Added {added} press releases to manual run for {company_name}")
+
+        if job.get("status") == "cancelled":
+            return
+
         overview_md = generate_overview(company_name, pdf_docs, on_progress, dynamic_companies, skip_filter=skip_filter)
         _save_overview(company_name, overview_md, current_urls)
+        job["label"] = "Extracting structured facts..."
+        null_report = run_extraction(company_name, pdf_docs)
+        job["null_report"] = null_report
         job["status"] = "done"
         job["overview_markdown"] = overview_md
     except Exception as e:
@@ -267,13 +288,25 @@ class ManualDocsRequest(BaseModel):
 
 @app.post("/companies/{company_name}/overview/start-manual")
 def start_overview_manual(company_name: str, body: ManualDocsRequest, background_tasks: BackgroundTasks):
-    # Register company for news/website scraping if not already known
-    if company_name not in {**COMPANIES, **dynamic_companies} and body.company_url:
-        dynamic_companies[company_name] = {
-            "base_url": body.company_url.rstrip("/"),
-            "investor_pages": [], "about_pages": [], "news_page": "/news/",
-        }
     pdf_docs = {label: url for label, url in body.docs.items() if url.strip()}
+
+    # Ensure company has a base_url in dynamic_companies for news PDF discovery.
+    # Priority: explicit company_url → Supabase saved url → leave empty.
+    existing = dynamic_companies.get(company_name, {})
+    if not existing.get("base_url"):
+        base_url = body.company_url.rstrip("/") if body.company_url else None
+        if not base_url:
+            row = supabase.table("company_overviews").select("company_url").eq("company_name", company_name).limit(1).execute()
+            if row.data and row.data[0].get("company_url"):
+                base_url = row.data[0]["company_url"]
+        if base_url:
+            dynamic_companies[company_name] = {
+                **existing,
+                "base_url": base_url,
+                "investor_pages": existing.get("investor_pages", []),
+                "about_pages": existing.get("about_pages", []),
+                "news_page": existing.get("news_page", "/news/"),
+            }
     current_urls = sorted(pdf_docs.values())
     pdf_list = list(pdf_docs.keys())
     job_id = str(uuid.uuid4())
@@ -327,8 +360,8 @@ def archive_overview(company_name: str):
     }).execute()
     supabase.table("company_overviews").delete().eq("company_name", company_name).execute()
     active_jobs_by_company.pop(company_name, None)
-    dynamic_companies.pop(company_name, None)
-    return {"archived_as": archived_name}
+    # Keep dynamic_companies entry so base_url is available for immediate regeneration
+    return {"archived_as": archived_name, "source_urls": existing.get("source_urls", [])}
 
 
 @app.get("/companies/{company_name}/active-job")

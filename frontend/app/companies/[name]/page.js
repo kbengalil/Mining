@@ -148,6 +148,34 @@ export default function CompanyPage() {
       .catch((e) => { setError(e.message); setStatus("error"); });
   }
 
+  function regenerate(docsOverride = null) {
+    const docs = docsOverride || pdfUrls;
+    if (docs && Object.keys(docs).length > 0) {
+      fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start-manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docs, company_url: null }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          setPdfs(data.pdfs || []);
+          setSelectedPdfs(data.selected_pdfs || []);
+          if (data.pdf_urls) setPdfUrls(data.pdf_urls);
+          jobIdRef.current = data.job_id;
+          setStatus("running");
+          startTimeRef.current = Date.now();
+          sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
+          timerRef.current = setInterval(() => {
+            setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+          }, 1000);
+          pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
+        })
+        .catch((e) => { setError(e.message); setStatus("error"); });
+    } else {
+      startAnalysis();
+    }
+  }
+
   function startManualAnalysis() {
     const docs = Object.fromEntries(
       Object.entries(uploadUrls).filter(([, url]) => url.trim())
@@ -239,9 +267,9 @@ export default function CompanyPage() {
               ⏹ Stop
             </button>
           )}
-          {status === "cached" && (
+          {(status === "cached" || status === "done") && (
             <button
-              onClick={startAnalysis}
+              onClick={() => regenerate()}
               className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
             >
               ↻ Regenerate
@@ -253,7 +281,17 @@ export default function CompanyPage() {
                 if (!confirm(`Archive report for ${companyName}?`)) return;
                 fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/archive`, { method: "POST" })
                   .then(r => r.json())
-                  .then(d => alert(`Archived as: ${d.archived_as}`))
+                  .then(d => {
+                    const urls = d.source_urls || [];
+                    const docs = {};
+                    urls.forEach(url => {
+                      const label = decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, "").split("?")[0]);
+                      if (label) docs[label] = url;
+                    });
+                    if (confirm(`Archived as: ${d.archived_as}\n\nRegenerate now with the same documents?`)) {
+                      regenerate(Object.keys(docs).length > 0 ? docs : null);
+                    }
+                  })
                   .catch(() => alert("Archive failed"));
               }}
               className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"

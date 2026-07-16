@@ -567,6 +567,57 @@ def sanitize_filename(label: str) -> str:
     return cleaned.strip("_") or "document"
 
 
+def discover_news_release_pdfs(company_name: str, dynamic_companies: dict | None = None, max_releases: int = 10) -> dict:
+    """Fetch the company news page and return PDF links for recent press releases."""
+    all_companies = {**COMPANIES, **(dynamic_companies or {})}
+    if company_name not in all_companies:
+        return {}
+    company = all_companies[company_name]
+    news_path = company.get("news_page")
+    if not news_path:
+        return {}
+    news_url = company["base_url"] + news_path
+    print(f"  [News PDFs] Scanning {news_url}")
+    try:
+        html = _get_page_html(news_url)
+    except Exception:
+        try:
+            r = requests.get(news_url, headers=HEADERS, timeout=15)
+            r.raise_for_status()
+            html = r.text
+        except Exception as e:
+            print(f"  [News PDFs] Could not fetch news page: {e}")
+            return {}
+
+    pdf_links = {}
+    soup = BeautifulSoup(html, "html.parser")
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if not href.lower().endswith(".pdf"):
+            continue
+        full_url = urljoin(news_url, href)
+        if full_url in pdf_links.values():
+            continue
+        label = a.get_text(strip=True) or href.split("/")[-1].replace(".pdf", "")
+        if not label or len(label) < 4:
+            label = href.split("/")[-1].replace(".pdf", "")
+        pdf_links[label] = full_url
+        if len(pdf_links) >= max_releases:
+            break
+
+    if len(pdf_links) < max_releases:
+        for match in re.findall(r'https://[^\s"\'<>]+\.pdf(?=["\'\s<>]|$)', html):
+            if match not in pdf_links.values():
+                label = match.split("/")[-1].split("?")[0].replace(".pdf", "")
+                pdf_links[label] = match
+            if len(pdf_links) >= max_releases:
+                break
+
+    print(f"  [News PDFs] Found {len(pdf_links)} press release PDFs")
+    return pdf_links
+
+
 def scrape_about_pages(company_name: str, dynamic_companies: dict | None = None) -> str:
     all_companies = {**COMPANIES, **(dynamic_companies or {})}
     if company_name not in all_companies:
@@ -662,11 +713,59 @@ def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10, dyna
     return result[:max_items]
 
 
+def _fetch_sedarplus_pdf(url: str) -> bytes:
+    """Use Playwright to fetch a SEDAR+ document URL, bypassing bot detection."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            ignore_https_errors=True,
+            accept_downloads=True,
+        )
+        page = ctx.new_page()
+        pdf_bytes = None
+
+        def handle_response(response):
+            nonlocal pdf_bytes
+            if "application/pdf" in response.headers.get("content-type", "") and pdf_bytes is None:
+                try:
+                    pdf_bytes = response.body()
+                except Exception:
+                    pass
+
+        page.on("response", handle_response)
+
+        try:
+            with page.expect_download(timeout=30000) as dl_info:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            download = dl_info.value
+            import pathlib, tempfile
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp_path = tmp.name
+            download.save_as(tmp_path)
+            pdf_bytes = pathlib.Path(tmp_path).read_bytes()
+            pathlib.Path(tmp_path).unlink(missing_ok=True)
+        except Exception:
+            # No download triggered — PDF may have been intercepted via response handler
+            if pdf_bytes is None:
+                page.wait_for_timeout(3000)
+
+        browser.close()
+
+    if not pdf_bytes:
+        raise ValueError(f"Could not retrieve PDF from SEDAR+ URL: {url}")
+    return pdf_bytes
+
+
 def fetch_pdf_bytes(url: str) -> bytes:
+    if "sedarplus.ca" in url:
+        return _fetch_sedarplus_pdf(url)
     edgar_headers = {"User-Agent": "MiningAI kbengalil@gmail.com", "Accept-Encoding": "gzip, deflate"}
     headers = edgar_headers if "sec.gov" in url else HEADERS
     response = requests.get(url, headers=headers, timeout=30)
     response.raise_for_status()
+    if "text/html" in response.headers.get("content-type", ""):
+        raise ValueError(f"Expected PDF but got HTML — possible bot detection or login wall")
     return response.content
 
 

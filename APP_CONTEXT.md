@@ -77,19 +77,17 @@ Mining/
 
 ---
 
-## The 11-Section Report
+## The 9-Section Report
 
-1. Recent Developments — all material events last 6 months with dates
+1. The Team — Founders / Management Team / Insider Ownership & Compensation (3 sub-sections)
 2. Company Snapshot — what they mine, where, development stage
-3. Founders — background, current involvement
-4. Management Team — each executive: title, years experience, prior roles
-5. Insider Ownership & Compensation — CEO comp breakdown from MIC, strategic shareholders
-6. Key Project Metrics — reserves, NPV, IRR, capex, mine life, exploration upside per project
-7. Financials — cash, debt, shares, warrants, every financing event, cash flow, budgets
-8. Jurisdiction — countries, sovereign risk factors
-9. Valuation vs Peers — P/NAV or EV/production vs named peer group
-10. Strategic Outlook — M&A plans, production targets, dividend/buyback policy
-11. Red Flags — structured checklist: technical studies, valuation, dilution, legal, financials, infrastructure, jurisdiction, management, business stage
+3. Key Project Metrics — reserves, NPV, IRR, capex, mine life, exploration upside per project
+4. Financials — cash, debt, shares, warrants, every financing event, cash flow, budgets
+5. Jurisdiction — countries, sovereign risk factors
+6. Recent Developments — all material events last 6 months with dates
+7. Valuation vs Peers — P/NAV or EV/production vs named peer group
+8. Strategic Outlook — M&A plans, production targets, dividend/buyback policy
+9. Red Flags — structured checklist: technical studies, valuation, dilution, legal, financials, infrastructure, jurisdiction, management, business stage
 
 ---
 

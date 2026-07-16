@@ -10,7 +10,7 @@ from supabase import create_client
 
 from scraping import fetch_pdf_bytes, scrape_about_pages, scrape_news, discover_company
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
 
 SYSTEM_INSTRUCTION = (
@@ -114,21 +114,17 @@ RECENT NEWS (newest first):
 COMPANY DOCUMENTS:
 {doc_texts}
 
-Write EXACTLY these 11 sections with markdown headers. Be concise and factual.
+Write EXACTLY these 9 sections with markdown headers. Be concise and factual.
 
-## Recent Developments
-List EVERY material news item from the last 6 months found in the documents or recent news feed. Include all of: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event, with the exact date. Do not summarize multiple events into one bullet.
+## The Team
 
-## Company Snapshot
-3-5 bullet points. What the company mines, where, and development stage (exploration / PEA / PFS / feasibility / production).
-
-## Founders
+### Founders
 Who founded the company, when, and a brief background on each founder. Note whether founders are still involved and in what capacity.
 
-## Management Team
+### Management Team
 For EACH key executive and board member, write 4-5 lines covering: full name, title, total years of experience, key previous roles (specific company names and positions), and domain expertise. Use one sub-bullet per person.
 
-## Insider Ownership & Compensation
+### Insider Ownership & Compensation
 From the Management Information Circular (proxy document):
 - Total shares owned or controlled by all directors and officers combined, as a % of total shares outstanding.
 - CEO shares owned or controlled specifically (number and %).
@@ -136,6 +132,9 @@ From the Management Information Circular (proxy document):
 - If any component is nil or not applicable, state nil.
 - If the Management Information Circular is not among the provided documents, write "Management Information Circular not provided — figures not available."
 Also check presentations and fact sheets for major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail (e.g. converted debt to equity, long-term holder, founding investor).
+
+## Company Snapshot
+3-5 bullet points. What the company mines, where, and development stage (exploration / PEA / PFS / feasibility / production).
 
 ## Key Project Metrics
 For EACH project, extract ALL of the following that are disclosed — do not skip any:
@@ -152,6 +151,9 @@ Include growth projects from any announced mergers or acquisitions — label the
 ## Financials
 Extract ALL of the following that are disclosed — do not summarize or skip:
 - Cash on hand (state the date of the figure)
+- Total debt — broken down long-term vs short-term (state the date)
+- Net debt — total debt minus cash on hand (calculate explicitly)
+- Available liquidity — cash plus undrawn credit facilities (state facility name, total size, amount drawn, amount undrawn)
 - Shares outstanding (state the date)
 - Warrants outstanding (number and expiry/strike if disclosed)
 - Options/RSUs/PSUs/DSUs outstanding (totals)
@@ -162,6 +164,9 @@ Extract ALL of the following that are disclosed — do not summarize or skip:
 
 ## Jurisdiction
 3-5 bullet points. Country/region of main projects, any sovereign risk factors mentioned in the documents.
+
+## Recent Developments
+List EVERY material news item from the last 6 months found in the documents or recent news feed. Include all of: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event, with the exact date. Do not summarize multiple events into one bullet.
 
 ## Valuation vs Peers
 If the documents include any peer group comparison: state the company's P/NAV (or EV/NAV or P/CF), the peer group median for the same metric, and the implied discount or premium. List the peer companies named. If no peer comparison is in the documents, write "Not disclosed."

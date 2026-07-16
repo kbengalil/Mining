@@ -1,37 +1,39 @@
 # Report Sections — Mining AI Analyst
 
-The 11 required sections of every company report, with all required bullet points.
+The 9 required sections of every company report, with all required bullet points.
 This file is the source of truth for what the OVERVIEW_PROMPT in `backend/agent.py` must extract.
 
 ---
 
-## 1. Recent Developments
-- Every material event from the last 6 months, with exact date, one bullet per event
-- Covers: permits, agreements, financings, drill results, milestones, legal updates, partnerships
+## 1. The Team
+
+### 1a. Founders
+- Who founded the company and when
+- Background on each founder
+- Current involvement and capacity
+
+### 1b. Management Team *(per person)*
+- Full name + title
+- Total years of experience
+- Key previous roles (company names + positions)
+- Domain expertise
+
+### 1c. Insider Ownership & Compensation
+- Total shares owned by all directors & officers combined (number + % of total)
+- CEO shares specifically (number + %)
+- CEO compensation breakdown: Base Salary, Bonus, RSUs/PSUs, Options, Pension, Other, Total
+- Strategic shareholders >5%: name, %, notable detail
+
+---
 
 ## 2. Company Snapshot
 - Commodity mined
 - Countries/regions of operations
 - Development stage (exploration / PEA / PFS / feasibility / production)
 
-## 3. Founders
-- Who founded it and when
-- Background on each founder
-- Current involvement and capacity
+---
 
-## 4. Management Team *(per person)*
-- Full name + title
-- Total years of experience
-- Key previous roles (company names + positions)
-- Domain expertise
-
-## 5. Insider Ownership & Compensation
-- Total shares owned by all directors & officers combined (number + % of total)
-- CEO shares specifically (number + %)
-- CEO compensation breakdown: Base Salary, Bonus, RSUs/PSUs, Options, Pension, Other, Total
-- Strategic shareholders >5%: name, %, notable detail
-
-## 6. Key Project Metrics *(per project)*
+## 3. Key Project Metrics *(per project)*
 - Resource: tonnes, grade, contained metal (M&I and Inferred separately)
 - Reserves: tonnes, grade, contained metal
 - NPV: amount, discount rate, metal price assumed, pre-tax or post-tax
@@ -41,7 +43,9 @@ This file is the source of truth for what the OVERVIEW_PROMPT in `backend/agent.
 - Average annual production (state the period, e.g. years 1–5 vs LOM)
 - Exploration upside (open along strike/depth, new zones, % of trend tested)
 
-## 7. Financials
+---
+
+## 4. Financials
 - Cash on hand (with date)
 - Total debt — broken down long-term vs short-term (with date)
 - Net debt — total debt minus cash
@@ -54,24 +58,38 @@ This file is the source of truth for what the OVERVIEW_PROMPT in `backend/agent.
 - Projected annual cash flow / free cash flow (LOM or annual, if disclosed)
 - Annual exploration or capex budget
 
-## 8. Jurisdiction
+---
+
+## 5. Jurisdiction
 - Countries/regions of main projects
 - Sovereign risk factors mentioned in documents
 
-## 9. Valuation vs Peers
+---
+
+## 6. Recent Developments
+- Every material event from the last 6 months, with exact date, one bullet per event
+- Covers: permits, agreements, financings, drill results, milestones, legal updates, partnerships
+
+---
+
+## 7. Valuation vs Peers
 - Company's P/NAV or EV/production metric
 - Peer group median for the same metric
 - Implied discount or premium
 - Peer companies named
 
-## 10. Strategic Outlook
+---
+
+## 8. Strategic Outlook
 - M&A appetite (explicit management statements)
 - Annual exploration / capex targets ($X/year)
 - Production growth timeline and targets
 - Dividend or buyback policy
 - Any other stated priorities
 
-## 11. Red Flags *(structured checklist — check every item)*
+---
+
+## 9. Red Flags *(structured checklist — check every item)*
 
 **Technical Studies:**
 - Any PEA, PFS, or feasibility study older than 3 years
