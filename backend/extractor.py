@@ -18,7 +18,7 @@ import pdfplumber
 import requests as http
 from supabase import create_client
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 _supabase = None
 
@@ -87,6 +87,7 @@ _CLASSIFY_PATTERNS = [
     ("mda",           re.compile(r"md&?a|management['\s]+discussion", re.IGNORECASE)),
     ("financial",     re.compile(r"financial[\s_]statement|annual[\s_]report|(?<![a-zA-Z])(?:fs|aif)(?![a-zA-Z])|annual[\s_]information[\s_]form", re.IGNORECASE)),
     ("press_release", re.compile(rf"^(?:{_MONTH_NAMES})\s+\d{{1,2}},\s+\d{{4}}", re.IGNORECASE)),
+    ("press_release", re.compile(r"^nr-\d{8}", re.IGNORECASE)),
     ("presentation",  re.compile(r"presentation|investor[\s_]deck|corporate[\s_]deck|fact[\s_]sheet", re.IGNORECASE)),
 ]
 

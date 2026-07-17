@@ -10,7 +10,7 @@ from supabase import create_client
 
 from scraping import fetch_pdf_bytes, scrape_about_pages, scrape_news, discover_company
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
 
 SYSTEM_INSTRUCTION = (

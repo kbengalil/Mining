@@ -269,7 +269,7 @@ export default function CompanyPage() {
           )}
           {(status === "cached" || status === "done") && (
             <button
-              onClick={() => regenerate()}
+              onClick={() => startAnalysis()}
               className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
             >
               ↻ Regenerate

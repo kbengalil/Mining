@@ -21,6 +21,9 @@ COMPANIES = {
             "/about/management/",
         ],
         "news_page": "/news/",
+        "extra_docs": {
+            "NI 43-101 Technical Report": "https://mkylvrcnswjtxnzqgpfx.supabase.co/storage/v1/object/public/documents/first-mining-gold/ni-43101-springpole-pfs-2025.pdf",
+        },
     },
     "Osisko Development Corp.": {
         "base_url": "https://osiskodev.com",
@@ -555,6 +558,7 @@ def find_pdf_links(company_name: str, dynamic_companies: dict | None = None) -> 
             print(f"  [PDF extraction failed] {url}: {e}")
             page_errors.append({"page": url, "reason": str(e)})
 
+    pdf_links.update(company.get("extra_docs", {}))
     return {"documents": pdf_links, "errors": page_errors}
 
 
@@ -715,6 +719,7 @@ def scrape_news(company_name: str, min_items: int = 5, max_items: int = 10, dyna
 
 def _fetch_sedarplus_pdf(url: str) -> bytes:
     """Use Playwright to fetch a SEDAR+ document URL, bypassing bot detection."""
+    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(
