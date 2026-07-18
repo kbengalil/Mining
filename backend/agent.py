@@ -116,6 +116,9 @@ COMPANY DOCUMENTS:
 
 Write EXACTLY these 9 sections with markdown headers. Be concise and factual.
 
+## Company Snapshot
+3-5 bullet points. What the company mines, where, and development stage (exploration / PEA / PFS / feasibility / production).
+
 ## The Team
 
 ### Founders
@@ -130,11 +133,25 @@ From the Management Information Circular (proxy document):
 - CEO shares owned or controlled specifically (number and %).
 - CEO total annual compensation, broken down into each component: Base Salary, Annual Bonus, Share-Based Awards (RSUs/PSUs), Option-Based Awards, Pension Value, Any Other Compensation, and Total.
 - If any component is nil or not applicable, state nil.
-- If the Management Information Circular is not among the provided documents, write "Management Information Circular not provided — figures not available."
+- The MIC may appear under filenames containing "circular", "proxy", "MIC", or "information circular" — check ALL provided documents before concluding it is absent.
+- If after checking all documents no MIC/proxy is found, write "Management Information Circular not provided — figures not available."
 Also check presentations and fact sheets for major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail (e.g. converted debt to equity, long-term holder, founding investor).
 
-## Company Snapshot
-3-5 bullet points. What the company mines, where, and development stage (exploration / PEA / PFS / feasibility / production).
+## Financials
+Use the most recent financial report available. Present all figures as a two-column markdown table. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Include every row that is disclosed — do not skip any. Calculate Net Debt explicitly (Total Debt minus Cash). If the company shows no debt items on the balance sheet (nothing under long-term borrowings or short-term debt), write "Nil" for those debt rows. If a figure is genuinely not disclosed anywhere in the documents, write "Not disclosed".
+
+Rows to include (in this order):
+- Cash and liquid assets (include the report date in the metric name, e.g. "Cash and liquid assets (Mar 31, 2026)"): sum cash + cash equivalents + short-term investments + marketable securities from the balance sheet — this should match the combined figure reported in press releases. List the components in a sub-note if they differ from the combined total.
+- Total debt — long-term
+- Total debt — short-term
+- Net debt (calculated)
+- Available liquidity (undrawn credit facilities)
+- Shares outstanding
+- Warrants outstanding
+- Options / RSUs / PSUs / DSUs outstanding
+- Annual cash burn (operating activities): look for "Cash used in operating activities" or "Net cash used in operating activities" in the Statement of Cash Flows — this figure is always disclosed in quarterly financial statements
+- LOM net free cash flow (if disclosed): always include the currency code and unit (e.g. "US$3,137M")
+- Annual exploration / capital budget (if disclosed)
 
 ## Key Project Metrics
 For EACH project, extract ALL of the following that are disclosed — do not skip any:
@@ -147,20 +164,6 @@ For EACH project, extract ALL of the following that are disclosed — do not ski
 - Average annual production (state the period, e.g. years 1-5 vs LOM)
 - Exploration upside (open along strike/depth, new zones, % of trend tested)
 Include growth projects from any announced mergers or acquisitions — label them clearly as "(from pending acquisition of [company])".
-
-## Financials
-Extract ALL of the following that are disclosed — do not summarize or skip:
-- Cash on hand (state the date of the figure)
-- Total debt — broken down long-term vs short-term (state the date)
-- Net debt — total debt minus cash on hand (calculate explicitly)
-- Available liquidity — cash plus undrawn credit facilities (state facility name, total size, amount drawn, amount undrawn)
-- Shares outstanding (state the date)
-- Warrants outstanding (number and expiry/strike if disclosed)
-- Options/RSUs/PSUs/DSUs outstanding (totals)
-- Cash burn rate (total cash used in operating activities per year, for each year disclosed in the financials)
-- EVERY financing event in the documents: date, type (private placement / public offering / flow-through / warrant exercise), amount raised, shares issued, warrant coverage if any
-- Projected annual cash flow or net free cash flow (LOM or annual, if disclosed)
-- Any stated annual exploration or capital spending budget
 
 ## Jurisdiction
 3-5 bullet points. Country/region of main projects, any sovereign risk factors mentioned in the documents.

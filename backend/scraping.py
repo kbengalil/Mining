@@ -543,21 +543,20 @@ def find_pdf_links(company_name: str, dynamic_companies: dict | None = None) -> 
     pdf_links = fetch_edgar_docs(company_name)
     if pdf_links:
         print(f"  [EDGAR] Using {len(pdf_links)} EDGAR documents — skipping website scrape")
-        return {"documents": pdf_links, "errors": []}
-    print(f"  [EDGAR] Not found on EDGAR — falling back to website scrape")
+    else:
+        print(f"  [EDGAR] Not found on EDGAR — falling back to website scrape")
+        for page_path in company["investor_pages"]:
+            if ".pdf" in page_path.lower():
+                continue
+            url = base_url + page_path
+            try:
+                wix_pdfs = _extract_pdfs_wix(url)
+                pdf_links.update(wix_pdfs)
+            except Exception as e:
+                print(f"  [PDF extraction failed] {url}: {e}")
+                page_errors.append({"page": url, "reason": str(e)})
 
-    for page_path in company["investor_pages"]:
-        if ".pdf" in page_path.lower():
-            continue
-        url = base_url + page_path
-
-        try:
-            wix_pdfs = _extract_pdfs_wix(url)
-            pdf_links.update(wix_pdfs)
-        except Exception as e:
-            print(f"  [PDF extraction failed] {url}: {e}")
-            page_errors.append({"page": url, "reason": str(e)})
-
+    # Always add extra_docs (e.g. Supabase-hosted NI 43-101) regardless of source
     pdf_links.update(company.get("extra_docs", {}))
     return {"documents": pdf_links, "errors": page_errors}
 

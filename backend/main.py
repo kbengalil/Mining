@@ -10,7 +10,8 @@ from pathlib import Path
 import requests as http
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -81,6 +82,49 @@ def get_documents(company_name: str):
     if company_name not in COMPANIES and company_name not in dynamic_companies:
         raise HTTPException(status_code=404, detail="Unknown company")
     return find_pdf_links(company_name, dynamic_companies)
+
+
+def _company_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-")
+
+
+@app.post("/companies/{company_name}/documents/upload")
+async def upload_documents(company_name: str, files: List[UploadFile] = File(...)):
+    slug = _company_slug(company_name)
+    uploaded = {}
+    for file in files:
+        content = await file.read()
+        filename = file.filename
+        storage_path = f"{slug}/{filename}"
+        supabase.storage.from_("documents").upload(
+            storage_path,
+            content,
+            file_options={"content-type": "application/pdf", "upsert": "true"},
+        )
+        url = supabase.storage.from_("documents").get_public_url(storage_path)
+        label = filename[:-4] if filename.lower().endswith(".pdf") else filename
+        uploaded[label] = url
+        print(f"  [Upload] Stored {filename} → {url}")
+    return {"documents": uploaded}
+
+
+@app.get("/companies/{company_name}/documents/uploaded")
+def get_uploaded_documents(company_name: str):
+    slug = _company_slug(company_name)
+    try:
+        files = supabase.storage.from_("documents").list(slug)
+        docs = {}
+        for f in (files or []):
+            name = f["name"]
+            if not name.lower().endswith(".pdf"):
+                continue
+            label = name[:-4]
+            url = supabase.storage.from_("documents").get_public_url(f"{slug}/{name}")
+            docs[label] = url
+        return {"documents": docs}
+    except Exception as e:
+        print(f"  [Upload] list error: {e}")
+        return {"documents": {}}
 
 
 class DownloadRequest(BaseModel):
@@ -190,21 +234,19 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
         if job.get("status") == "cancelled":
             return
 
-        # For manual runs (skip_filter=True), auto-discover press release PDFs from the news page
-        # and merge them in so Recent Developments gets full press release detail.
-        if skip_filter:
-            job["label"] = "Fetching recent press releases..."
-            news_pdfs = discover_news_release_pdfs(company_name, dynamic_companies)
-            added = 0
-            for label, url in news_pdfs.items():
-                if url not in pdf_docs.values():
-                    pdf_docs[label] = url
-                    added += 1
-            if added:
-                job["pdfs"] = list(pdf_docs.keys())
-                job["pdf_urls"] = dict(pdf_docs)
-                job["total"] = len(pdf_docs)
-                print(f"  [News PDFs] Added {added} press releases to manual run for {company_name}")
+        # news PDF discovery disabled — news comes from Gemini web access
+        # job["label"] = "Fetching recent press releases..."
+        # news_pdfs = discover_news_release_pdfs(company_name, dynamic_companies)
+        # added = 0
+        # for label, url in news_pdfs.items():
+        #     if url not in pdf_docs.values():
+        #         pdf_docs[label] = url
+        #         added += 1
+        # if added:
+        #     job["pdfs"] = list(pdf_docs.keys())
+        #     job["pdf_urls"] = dict(pdf_docs)
+        #     job["total"] = len(pdf_docs)
+        #     print(f"  [News PDFs] Added {added} press releases for {company_name}")
 
         if job.get("status") == "cancelled":
             return

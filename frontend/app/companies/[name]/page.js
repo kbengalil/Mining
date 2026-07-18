@@ -42,10 +42,9 @@ export default function CompanyPage() {
   const [job, setJob] = useState(null);
   const [overview, setOverview] = useState(null);
   const [status, setStatus] = useState("starting"); // starting | upload | running | done | error | cached
-  const [uploadUrls, setUploadUrls] = useState(() =>
-    Object.fromEntries(UPLOAD_DOCS.map((d) => [d.key, ""]))
-  );
-  const [companyWebsiteUrl, setCompanyWebsiteUrl] = useState("");
+  const [uploadedDocs, setUploadedDocs] = useState({});
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [finalTime, setFinalTime] = useState(null);
@@ -98,35 +97,38 @@ export default function CompanyPage() {
   }, [companyName, existingJobId]);
 
   function checkCacheOrStart() {
-      // First check if a cached report exists — show it immediately
-      fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`)
-        .then((r) => r.ok ? r.json() : null)
-        .then((cached) => {
-          if (cached) {
-            setOverview(cached.overview_markdown);
-            if (cached.source_urls) {
-              const map = {};
-              cached.source_urls.forEach((url) => {
-                const label = decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, ""));
-                map[label] = url;
-              });
-              setPdfUrls(map);
-              setPdfs(Object.keys(map));
-              if (cached.selected_urls && cached.selected_urls.length > 0) {
-                const selectedLabels = cached.selected_urls.map(
-                  (url) => decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, ""))
-                );
-                setSelectedPdfs(selectedLabels);
-              } else {
-                setSelectedPdfs(Object.keys(map));
-              }
+    fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((cached) => {
+        if (cached) {
+          setOverview(cached.overview_markdown);
+          if (cached.source_urls) {
+            const map = {};
+            cached.source_urls.forEach((url) => {
+              const label = decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, ""));
+              map[label] = url;
+            });
+            setPdfUrls(map);
+            setPdfs(Object.keys(map));
+            if (cached.selected_urls && cached.selected_urls.length > 0) {
+              const selectedLabels = cached.selected_urls.map(
+                (url) => decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, ""))
+              );
+              setSelectedPdfs(selectedLabels);
+            } else {
+              setSelectedPdfs(Object.keys(map));
             }
-            setStatus("cached");
-          } else {
-            setStatus("upload");
           }
-        })
-        .catch(() => setStatus("upload"));
+          setStatus("cached");
+        } else {
+          // No cached report — load any previously uploaded docs
+          fetch(`${API}/companies/${encodeURIComponent(companyName)}/documents/uploaded`)
+            .then((r) => r.json())
+            .then((data) => { setUploadedDocs(data.documents || {}); setStatus("upload"); })
+            .catch(() => setStatus("upload"));
+        }
+      })
+      .catch(() => setStatus("upload"));
   }
 
   function startAnalysis() {
@@ -202,6 +204,34 @@ export default function CompanyPage() {
       .catch((e) => { setError(e.message); setStatus("error"); });
   }
 
+  async function uploadAndGenerate(files) {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      files.forEach((f) => formData.append("files", f));
+      const res = await fetch(`${API}/companies/${encodeURIComponent(companyName)}/documents/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      setUploadedDocs(data.documents || {});
+      regenerate(data.documents);
+    } catch (e) {
+      setError(e.message);
+      setStatus("error");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function regenerateFromUploaded() {
+    const res = await fetch(`${API}/companies/${encodeURIComponent(companyName)}/documents/uploaded`);
+    const data = await res.json();
+    const docs = data.documents || {};
+    if (Object.keys(docs).length > 0) regenerate(docs);
+    else startAnalysis();
+  }
+
   function pollJob(jobId) {
     fetch(`${API}/overview-jobs/${jobId}`)
       .then((r) => {
@@ -269,7 +299,7 @@ export default function CompanyPage() {
           )}
           {(status === "cached" || status === "done") && (
             <button
-              onClick={() => startAnalysis()}
+              onClick={regenerateFromUploaded}
               className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
             >
               ↻ Regenerate
@@ -331,8 +361,8 @@ export default function CompanyPage() {
         <div className="bg-red-50 text-red-700 rounded-lg p-4 text-sm mb-6">{error}</div>
       )}
 
-      {/* PDF list */}
-      {pdfs.length > 0 && (
+      {/* PDF list — only show once the report is ready */}
+      {pdfs.length > 0 && (status === "done" || status === "cached") && (
         <div className="mb-8">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
             Documents found ({pdfs.length})
@@ -410,73 +440,84 @@ export default function CompanyPage() {
         <p className="text-sm text-gray-400 mb-8">Finding documents...</p>
       )}
 
-      {/* Manual document upload panel */}
+      {/* Document upload panel */}
       {status === "upload" && (
         <div className="mb-8">
-          <p className="text-sm text-gray-600 mb-1 font-medium">
-            Paste PDF links from {companyName}&apos;s investor relations page.
-          </p>
-          <p className="text-xs text-gray-400 mb-5">
-            All fields are optional — leave blank to skip. News and website info are fetched automatically.
-          </p>
-          <div className="space-y-3 mb-6">
-            {UPLOAD_DOCS.map(({ key, label, tip, sedar, edgar }, idx) => {
-              const sedarUrl = `https://www.sedarplus.ca/csa-party/records/search.html`;
-              const edgarUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=${encodeURIComponent(companyName)}&CIK=&type=&dateb=&owner=include&count=40&search_text=`;
-              return (
-                <div key={key} className="flex items-center gap-3">
-                  <div className="flex items-center gap-1 w-56 flex-shrink-0">
-                    <span className="text-xs text-gray-400 w-4 flex-shrink-0">{idx + 1}.</span>
-                    <label className="text-sm text-gray-600">{label}</label>
-                    <div className="relative group">
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-xs cursor-default leading-none">?</span>
-                      <div className="absolute left-5 top-0 z-20 w-72 p-2.5 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg">
-                        {tip}
-                      </div>
-                    </div>
-                  </div>
+          {Object.keys(uploadedDocs).length > 0 ? (
+            <>
+              <p className="text-sm text-gray-600 mb-1 font-medium">
+                Documents on file ({Object.keys(uploadedDocs).length})
+              </p>
+              <p className="text-xs text-gray-400 mb-4">
+                News and website info are fetched automatically.
+              </p>
+              <ul className="space-y-1 mb-6">
+                {Object.keys(uploadedDocs).map((label) => (
+                  <li key={label} className="text-sm text-gray-700 flex items-center gap-2">
+                    <span className="text-green-500">✓</span> {label}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-3 items-center">
+                <button
+                  onClick={() => regenerate(uploadedDocs)}
+                  className="text-sm px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Generate Report
+                </button>
+                <label className="text-sm text-gray-400 cursor-pointer hover:text-gray-600 transition-colors">
+                  Replace files
                   <input
-                    type="url"
-                    placeholder="https://..."
-                    value={uploadUrls[key]}
-                    onChange={(e) =>
-                      setUploadUrls((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
-                    className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    type="file"
+                    webkitdirectory=""
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+                      if (files.length > 0) uploadAndGenerate(files);
+                    }}
                   />
-                  <div className="flex gap-1 flex-shrink-0">
-                    {sedar && (
-                      <a href={sedarUrl} target="_blank" rel="noopener noreferrer"
-                        className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors whitespace-nowrap">
-                        SEDAR+
-                      </a>
-                    )}
-                    {edgar && (
-                      <a href={edgarUrl} target="_blank" rel="noopener noreferrer"
-                        className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded hover:bg-gray-200 transition-colors whitespace-nowrap">
-                        EDGAR
-                      </a>
-                    )}
-                    {!sedar && !edgar && <div className="w-16" />}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={startManualAnalysis}
-              className="text-sm px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Generate Report
-            </button>
-            <button
-              onClick={startAnalysis}
-              className="text-sm px-5 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
-            >
-              Skip — auto-scan instead
-            </button>
-          </div>
+                </label>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-600 mb-1 font-medium">
+                Upload documents for {companyName}
+              </p>
+              <p className="text-xs text-gray-400 mb-5">
+                Select up to 6 PDF files. News and website info are fetched automatically.
+              </p>
+              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition-colors mb-4">
+                <span className="text-2xl mb-1">📄</span>
+                <span className="text-sm text-gray-500">Click to select folder</span>
+                <span className="text-xs text-gray-400 mt-0.5">all PDFs in the folder will be uploaded</span>
+                <input
+                  type="file"
+                  webkitdirectory=""
+                  multiple
+                  className="hidden"
+                  onChange={(e) => setPendingFiles(Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith(".pdf")))}
+                />
+              </label>
+              {pendingFiles.length > 0 && (
+                <ul className="space-y-1 mb-4">
+                  {pendingFiles.map((f) => (
+                    <li key={f.name} className="text-sm text-gray-700 flex items-center gap-2">
+                      <span className="text-blue-400">📄</span> {f.name}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                onClick={() => uploadAndGenerate(pendingFiles)}
+                disabled={pendingFiles.length === 0 || uploading}
+                className="text-sm px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {uploading ? "Uploading..." : "Generate Report"}
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -500,6 +541,15 @@ export default function CompanyPage() {
   );
 }
 
+function parseInline(text) {
+  // bold: **text**
+  return text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : part
+  );
+}
+
 function OverviewRenderer({ markdown }) {
   const sections = markdown.split(/\n(?=## )/).filter(Boolean);
 
@@ -509,16 +559,19 @@ function OverviewRenderer({ markdown }) {
         const lines = section.trim().split("\n");
         const title = lines[0].replace(/^##\s*/, "").trim();
         const isRedFlags = title.toLowerCase().includes("red flag");
+        const contentLines = lines.slice(1);
 
-        const bullets = lines
-          .slice(1)
-          .filter((l) => l.trim().startsWith("-"))
-          .map((l) => l.replace(/^-\s*/, "").trim());
+        const isSep = (l) => /^\|[-: |]+\|/.test(l.trim());
+        const isTableRow = (l) => l.trim().startsWith("|");
 
-        const prose = lines
-          .slice(1)
-          .filter((l) => l.trim() && !l.trim().startsWith("-"))
-          .map((l) => l.trim());
+        const tableRows = contentLines.filter((l) => isTableRow(l) && !isSep(l));
+        const hasTable = tableRows.length > 0;
+
+        const parseRow = (l) =>
+          l.trim().split("|").filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map((c) => c.trim());
+
+        const bullets = contentLines.filter((l) => l.trim().startsWith("-")).map((l) => l.replace(/^-\s*/, "").trim());
+        const prose = contentLines.filter((l) => l.trim() && !isTableRow(l) && !isSep(l) && !l.trim().startsWith("-")).map((l) => l.trim());
 
         return (
           <div key={i} className={`border-l-2 pl-4 ${isRedFlags ? "border-red-300" : "border-gray-200"}`}>
@@ -526,14 +579,36 @@ function OverviewRenderer({ markdown }) {
               {title}
             </h2>
             {prose.map((line, j) => (
-              <p key={j} className="text-sm text-gray-600 mb-1">{line}</p>
+              <p key={j} className="text-sm text-gray-600 mb-1">{parseInline(line)}</p>
             ))}
+            {hasTable && (
+              <div className="overflow-x-auto mt-2 mb-2">
+                <table className="text-sm w-full border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      {parseRow(tableRows[0]).map((cell, j) => (
+                        <th key={j} className="text-left py-1 pr-4 font-semibold text-gray-700">{parseInline(cell)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableRows.slice(1).map((row, j) => (
+                      <tr key={j} className="border-b border-gray-100">
+                        {parseRow(row).map((cell, k) => (
+                          <td key={k} className="py-1 pr-4 text-gray-600 align-top">{parseInline(cell)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {bullets.length > 0 && (
               <ul className="space-y-1">
                 {bullets.map((b, j) => (
                   <li key={j} className="flex gap-2 text-sm">
                     <span className={`flex-shrink-0 ${isRedFlags ? "text-red-400" : "text-gray-400"}`}>•</span>
-                    <span className={isRedFlags ? "text-red-800" : "text-gray-700"}>{b}</span>
+                    <span className={isRedFlags ? "text-red-800" : "text-gray-700"}>{parseInline(b)}</span>
                   </li>
                 ))}
               </ul>
