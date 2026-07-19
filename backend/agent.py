@@ -122,7 +122,7 @@ COMPANY DOCUMENTS:
 Write EXACTLY these 9 sections with markdown headers. Be concise and factual.
 
 ## Company Snapshot
-3-5 bullet points. What the company mines, where, and development stage (exploration / PEA / PFS / feasibility / production).
+3-5 bullet points. What the company mines, where, development stage (exploration / PEA / PFS / feasibility / production), country/region of main projects, and any sovereign risk factors mentioned in the documents.
 
 ## The Team
 
@@ -143,44 +143,24 @@ From the Management Information Circular (proxy document):
 Also check presentations and fact sheets for: (1) major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail; and (2) the overall shareholder mix breakdown by category (e.g. Retail, Institutional, Management) if disclosed — include this even if no single named shareholder owns >5%.
 
 ## Financials
-Use the most recent financial report available. Present all figures as a two-column markdown table. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Include every row that is disclosed — do not skip any. Calculate Net Debt explicitly (Total Debt minus Cash). If the company shows no debt items on the balance sheet (nothing under long-term borrowings or short-term debt), write "Nil" for those debt rows. If a figure is genuinely not disclosed anywhere in the documents, write "Not disclosed".
+Use the most recent financial report available. Present all figures as a two-column markdown table. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Mark any calculated (not directly sourced) figure with "(calc)" in the metric name. If a figure is genuinely not disclosed, write "Not disclosed".
 
-Rows to include (in this order):
-- Cash and liquid assets (include the report date in the metric name, e.g. "Cash and liquid assets (Mar 31, 2026)"): sum cash + cash equivalents + short-term investments + marketable securities from the balance sheet — this should match the combined figure reported in press releases. List the components in a sub-note if they differ from the combined total.
-- Total debt — long-term
-- Total debt — short-term
-- Net debt (calculated)
-- Available liquidity (undrawn credit facilities)
-- Shares outstanding
-- Warrants outstanding
-- Options / RSUs / PSUs / DSUs outstanding
-- Annual cash burn (operating activities): look for "Cash used in operating activities" or "Net cash used in operating activities" in the Statement of Cash Flows — this figure is always disclosed in quarterly financial statements
-- LOM net free cash flow (if disclosed): always include the currency code and unit (e.g. "US$3,137M")
+IMPORTANT: Extract and present every line item in EXACTLY the same order and grouping as they appear in the balance sheet. Do not reorder, skip, or combine lines. The user will compare this table side by side with the source document, so the structure must match. Use bold group labels exactly as they appear in the document (e.g. **Assets — Current**, **Assets — Non-current**, **Liabilities — Current**, **Liabilities — Non-current**, **Shareholders' Equity**). Include every subtotal and total line (Total current assets, Total non-current assets, Total assets, Total current liabilities, Total non-current liabilities, Total liabilities, Total shareholders' equity, Total liabilities and shareholders' equity).
+
+Include the report date in the section header (e.g. "As at March 31, 2026").
+
+After the balance sheet table, add a second small table titled **Cash Flow & Capital** with these rows:
+- Annual cash burn (operating activities): from the Statement of Cash Flows — "Cash used in operating activities"
+- **Cash runway (calc)** — Total liquid assets divided by annual cash burn in years (exploration-stage only; omit if development/construction-stage)
 - Annual exploration / capital budget (if disclosed)
+- LOM net free cash flow (if disclosed) — state pre-tax or post-tax and include currency
 
-## Key Project Metrics
-For EACH project, extract ALL of the following that are disclosed — do not skip any:
-- Resource: tonnes, grade, contained metal (state M&I and Inferred separately)
-- Reserves: tonnes, grade, contained metal (if stated)
-- NPV: amount, discount rate, commodity price assumed, pre-tax or post-tax. Include ALL sensitivity scenarios disclosed (e.g. base case AND higher price deck) — do not omit any.
-- IRR: % and commodity price assumed. Include ALL sensitivity scenarios disclosed.
-- Initial capex
-- Mine life
-- Average annual production (state the period, e.g. years 1-5 vs LOM)
-- Exploration upside (open along strike/depth, new zones, % of trend tested)
-Include growth projects from any announced mergers or acquisitions — label them clearly as "(from pending acquisition of [company])".
-
-## Jurisdiction
-3-5 bullet points. Country/region of main projects, any sovereign risk factors mentioned in the documents.
-
-## Recent Developments
-You have TWO sources for this section and you MUST use both:
-1. The RECENT NEWS section above — scraped directly from the company's news page. You MUST include EVERY item listed there, no exceptions. These go first, newest to oldest.
-2. The uploaded documents — add any material events found there that are not already in the news feed.
-Include: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event with the exact date. Do not summarize multiple events into one bullet. Do not skip any news item from the RECENT NEWS section.
-
-## Valuation vs Peers
-If the documents include any peer group comparison: state the company's P/NAV (or EV/NAV or P/CF), the peer group median for the same metric, and the implied discount or premium. Also include the value per ounce (US$/oz or C$/oz) metric if disclosed, with the peer group comparison figures. List the peer companies named. If no peer comparison is in the documents, write "Not disclosed."
+After the Cash Flow & Capital table, add a third small table titled **Share Structure** with these rows:
+- Shares outstanding (include the date)
+- Warrants outstanding
+- Options outstanding
+- RSUs / PSUs / DSUs outstanding (combine into one row)
+- **Fully diluted shares (calc)** — sum of all above
 
 ## Strategic Outlook
 Summarize explicit management statements from any document on: future M&A appetite (e.g. "no further acquisitions planned"), annual exploration or capital spending targets ($X/year), production growth timeline and targets, dividend or buyback policy, and any other stated priorities. Quote figures directly where available. If not disclosed, write "Not disclosed."
@@ -238,6 +218,27 @@ Business Stage:
 After completing the checklist, add any additional red flags you identify that are not covered above.
 Cross-reference with Recent News: if a red flag from the documents has been resolved in a recent press release, keep the bullet but append "— Resolved per [date] press release."
 Omit any checklist item where there is genuinely nothing to flag — do not write "no issues found" for clean items.
+
+## Recent Developments
+You have TWO sources for this section and you MUST use both:
+1. The RECENT NEWS section above — scraped directly from the company's news page. You MUST include EVERY item listed there, no exceptions. These go first, newest to oldest.
+2. The uploaded documents — add any material events found there that are not already in the news feed.
+Include: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event with the exact date. Do not summarize multiple events into one bullet. Do not skip any news item from the RECENT NEWS section.
+
+## Key Project Metrics
+For EACH project, extract ALL of the following that are disclosed — do not skip any:
+- Resource: tonnes, grade, contained metal (state M&I and Inferred separately)
+- Reserves: tonnes, grade, contained metal (if stated)
+- NPV: amount, discount rate, commodity price assumed, pre-tax or post-tax. Include ALL sensitivity scenarios disclosed (e.g. base case AND higher price deck) — do not omit any.
+- IRR: % and commodity price assumed. Include ALL sensitivity scenarios disclosed.
+- Initial capex
+- Mine life
+- Average annual production (state the period, e.g. years 1-5 vs LOM)
+- Exploration upside (open along strike/depth, new zones, % of trend tested)
+Include growth projects from any announced mergers or acquisitions — label them clearly as "(from pending acquisition of [company])".
+
+## Valuation vs Peers
+If the documents include any peer group comparison: state the company's P/NAV (or EV/NAV or P/CF), the peer group median for the same metric, and the implied discount or premium. Also include the value per ounce (US$/oz or C$/oz) metric if disclosed, with the peer group comparison figures. List the peer companies named. If no peer comparison is in the documents, write "Not disclosed."
 
 RULES:
 - Do not invent data. If something is not in the documents or website, write "Not disclosed."
