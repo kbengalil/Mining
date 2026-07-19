@@ -88,9 +88,29 @@ def _company_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-")
 
 
+def _list_all_storage_paths(prefix: str) -> list[str]:
+    """Recursively list all file paths under a storage prefix."""
+    paths = []
+    items = supabase.storage.from_("documents").list(prefix) or []
+    for item in items:
+        full = f"{prefix}/{item['name']}"
+        if item.get("id") is None:  # folder (no id)
+            paths.extend(_list_all_storage_paths(full))
+        else:
+            paths.append(full)
+    return paths
+
+
 @app.post("/companies/{company_name}/documents/upload")
 async def upload_documents(company_name: str, files: List[UploadFile] = File(...)):
     slug = _company_slug(company_name)
+
+    # Wipe existing folder so the new upload is the only source of truth
+    existing_paths = _list_all_storage_paths(slug)
+    if existing_paths:
+        supabase.storage.from_("documents").remove(existing_paths)
+        print(f"  [Upload] Deleted {len(existing_paths)} existing files from {slug}/")
+
     uploaded = {}
     for file in files:
         content = await file.read()

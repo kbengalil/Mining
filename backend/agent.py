@@ -130,7 +130,7 @@ Write EXACTLY these 9 sections with markdown headers. Be concise and factual.
 Who founded the company, when, and a brief background on each founder. Note whether founders are still involved and in what capacity.
 
 ### Management Team
-For EACH key executive and board member, write 4-5 lines covering: full name, title, total years of experience, key previous roles (specific company names and positions), and domain expertise. Use one sub-bullet per person.
+For EACH key executive and board member, write 4-5 lines covering: full name, title, total years of experience, key previous roles (specific company names and positions), and domain expertise. Use one sub-bullet per person. Copy years of experience EXACTLY as stated in the source document — do not round or paraphrase (e.g. if the document says "over 25 years", write "25+" not "30+").
 
 ### Insider Ownership & Compensation
 From the Management Information Circular (proxy document):
@@ -140,7 +140,7 @@ From the Management Information Circular (proxy document):
 - If any component is nil or not applicable, state nil.
 - The MIC may appear under filenames containing "circular", "proxy", "MIC", or "information circular" — check ALL provided documents before concluding it is absent.
 - If after checking all documents no MIC/proxy is found, write "Management Information Circular not provided — figures not available."
-Also check presentations and fact sheets for major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail (e.g. converted debt to equity, long-term holder, founding investor).
+Also check presentations and fact sheets for: (1) major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail; and (2) the overall shareholder mix breakdown by category (e.g. Retail, Institutional, Management) if disclosed — include this even if no single named shareholder owns >5%.
 
 ## Financials
 Use the most recent financial report available. Present all figures as a two-column markdown table. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Include every row that is disclosed — do not skip any. Calculate Net Debt explicitly (Total Debt minus Cash). If the company shows no debt items on the balance sheet (nothing under long-term borrowings or short-term debt), write "Nil" for those debt rows. If a figure is genuinely not disclosed anywhere in the documents, write "Not disclosed".
@@ -162,8 +162,8 @@ Rows to include (in this order):
 For EACH project, extract ALL of the following that are disclosed — do not skip any:
 - Resource: tonnes, grade, contained metal (state M&I and Inferred separately)
 - Reserves: tonnes, grade, contained metal (if stated)
-- NPV: amount, discount rate, commodity price assumed, pre-tax or post-tax
-- IRR: % and commodity price assumed
+- NPV: amount, discount rate, commodity price assumed, pre-tax or post-tax. Include ALL sensitivity scenarios disclosed (e.g. base case AND higher price deck) — do not omit any.
+- IRR: % and commodity price assumed. Include ALL sensitivity scenarios disclosed.
 - Initial capex
 - Mine life
 - Average annual production (state the period, e.g. years 1-5 vs LOM)
@@ -180,7 +180,7 @@ You have TWO sources for this section and you MUST use both:
 Include: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event with the exact date. Do not summarize multiple events into one bullet. Do not skip any news item from the RECENT NEWS section.
 
 ## Valuation vs Peers
-If the documents include any peer group comparison: state the company's P/NAV (or EV/NAV or P/CF), the peer group median for the same metric, and the implied discount or premium. List the peer companies named. If no peer comparison is in the documents, write "Not disclosed."
+If the documents include any peer group comparison: state the company's P/NAV (or EV/NAV or P/CF), the peer group median for the same metric, and the implied discount or premium. Also include the value per ounce (US$/oz or C$/oz) metric if disclosed, with the peer group comparison figures. List the peer companies named. If no peer comparison is in the documents, write "Not disclosed."
 
 ## Strategic Outlook
 Summarize explicit management statements from any document on: future M&A appetite (e.g. "no further acquisitions planned"), annual exploration or capital spending targets ($X/year), production growth timeline and targets, dividend or buyback policy, and any other stated priorities. Quote figures directly where available. If not disclosed, write "Not disclosed."
