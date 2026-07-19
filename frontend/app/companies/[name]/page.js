@@ -131,7 +131,17 @@ export default function CompanyPage() {
       .catch(() => setStatus("upload"));
   }
 
+  function _startTimer() {
+    clearInterval(timerRef.current);
+    startTimeRef.current = Date.now();
+    sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+  }
+
   function startAnalysis() {
+    _startTimer();
     fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start?force=true`, { method: "POST" })
       .then((r) => r.json())
       .then((data) => {
@@ -140,11 +150,6 @@ export default function CompanyPage() {
         if (data.pdf_urls) setPdfUrls(data.pdf_urls);
         jobIdRef.current = data.job_id;
         setStatus("running");
-        startTimeRef.current = Date.now();
-        sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
-        timerRef.current = setInterval(() => {
-          setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-        }, 1000);
         pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
       })
       .catch((e) => { setError(e.message); setStatus("error"); });
@@ -153,6 +158,7 @@ export default function CompanyPage() {
   function regenerate(docsOverride = null) {
     const docs = docsOverride || pdfUrls;
     if (docs && Object.keys(docs).length > 0) {
+      if (!startTimeRef.current) _startTimer();
       fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start-manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -165,11 +171,6 @@ export default function CompanyPage() {
           if (data.pdf_urls) setPdfUrls(data.pdf_urls);
           jobIdRef.current = data.job_id;
           setStatus("running");
-          startTimeRef.current = Date.now();
-          sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
-          timerRef.current = setInterval(() => {
-            setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-          }, 1000);
           pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
         })
         .catch((e) => { setError(e.message); setStatus("error"); });
@@ -182,6 +183,7 @@ export default function CompanyPage() {
     const docs = Object.fromEntries(
       Object.entries(uploadUrls).filter(([, url]) => url.trim())
     );
+    _startTimer();
     fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/start-manual`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -194,17 +196,14 @@ export default function CompanyPage() {
         if (data.pdf_urls) setPdfUrls(data.pdf_urls);
         jobIdRef.current = data.job_id;
         setStatus("running");
-        startTimeRef.current = Date.now();
-        sessionStorage.setItem(`job_start_${companyName}`, startTimeRef.current);
-        timerRef.current = setInterval(() => {
-          setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-        }, 1000);
         pollRef.current = setInterval(() => pollJob(data.job_id), 1000);
       })
       .catch((e) => { setError(e.message); setStatus("error"); });
   }
 
   async function uploadAndGenerate(files) {
+    _startTimer();
+    setStatus("running");
     setUploading(true);
     try {
       const formData = new FormData();
@@ -255,18 +254,21 @@ export default function CompanyPage() {
           clearInterval(timerRef.current);
           sessionStorage.removeItem(`job_start_${companyName}`);
           setFinalTime(Math.floor((Date.now() - startTimeRef.current) / 1000));
+          startTimeRef.current = null;
           setOverview(data.overview_markdown);
           setStatus("done");
         } else if (data.status === "error") {
           clearInterval(pollRef.current);
           clearInterval(timerRef.current);
           sessionStorage.removeItem(`job_start_${companyName}`);
+          startTimeRef.current = null;
           setError(data.error);
           setStatus("error");
         } else if (data.status === "cancelled") {
           clearInterval(pollRef.current);
           clearInterval(timerRef.current);
           sessionStorage.removeItem(`job_start_${companyName}`);
+          startTimeRef.current = null;
           setStatus("error");
           setError("Analysis stopped.");
         }
@@ -534,23 +536,41 @@ export default function CompanyPage() {
           {status === "done" && finalTime !== null && (
             <p className="text-xs text-gray-400 mb-4">Generated in {formatTime(finalTime)}</p>
           )}
-          <OverviewRenderer markdown={overview} />
+          <OverviewRenderer markdown={overview} pdfUrls={pdfUrls} />
         </>
       )}
     </main>
   );
 }
 
-function parseInline(text) {
-  // bold: **text**
-  return text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
-    part.startsWith("**") && part.endsWith("**")
-      ? <strong key={i}>{part.slice(2, -2)}</strong>
-      : part
-  );
+function makeParseInline(pdfUrls) {
+  return function parseInline(text) {
+    return text.split(/(\*\*[^*]+\*\*|\[src:[^\]]+\])/).map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**"))
+        return <strong key={i}>{part.slice(2, -2)}</strong>;
+      const m = part.match(/^\[src:(.+),\s*p\.(\d+)\]$/);
+      if (m) {
+        const label = m[1].trim();
+        const page = m[2];
+        const url = pdfUrls?.[label]
+          || Object.entries(pdfUrls || {}).find(([k]) => k.toLowerCase() === label.toLowerCase())?.[1];
+        return url ? (
+          <a key={i} href={`${url}#page=${page}`} target="_blank" rel="noopener noreferrer"
+             className="inline-flex text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded px-1 ml-0.5 no-underline"
+             style={{ verticalAlign: "super", lineHeight: 1 }}>
+            p.{page}
+          </a>
+        ) : (
+          <sup key={i} className="text-xs text-gray-400 ml-0.5">[p.{page}]</sup>
+        );
+      }
+      return part;
+    });
+  };
 }
 
-function OverviewRenderer({ markdown }) {
+function OverviewRenderer({ markdown, pdfUrls }) {
+  const parseInline = makeParseInline(pdfUrls);
   const sections = markdown.split(/\n(?=## )/).filter(Boolean);
 
   return (

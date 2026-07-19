@@ -47,7 +47,12 @@ def _extract_text(pdf_bytes: bytes) -> str:
         soup = BeautifulSoup(pdf_bytes, "html.parser")
         return soup.get_text(separator="\n", strip=True)
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        return "\n".join(page.extract_text() or "" for page in pdf.pages)
+        pages = []
+        for i, page in enumerate(pdf.pages, 1):
+            text = page.extract_text() or ""
+            if text.strip():
+                pages.append(f"[Page {i}]\n{text}")
+        return "\n".join(pages)
 
 
 def _embed_query(text: str) -> list[float]:
@@ -169,7 +174,10 @@ Include growth projects from any announced mergers or acquisitions — label the
 3-5 bullet points. Country/region of main projects, any sovereign risk factors mentioned in the documents.
 
 ## Recent Developments
-List EVERY material news item from the last 6 months found in the documents or recent news feed. Include all of: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event, with the exact date. Do not summarize multiple events into one bullet.
+You have TWO sources for this section and you MUST use both:
+1. The RECENT NEWS section above — scraped directly from the company's news page. You MUST include EVERY item listed there, no exceptions. These go first, newest to oldest.
+2. The uploaded documents — add any material events found there that are not already in the news feed.
+Include: permits, agreements, financings, drill results, project milestones, legal updates, partnerships. One bullet per event with the exact date. Do not summarize multiple events into one bullet. Do not skip any news item from the RECENT NEWS section.
 
 ## Valuation vs Peers
 If the documents include any peer group comparison: state the company's P/NAV (or EV/NAV or P/CF), the peer group median for the same metric, and the implied discount or premium. List the peer companies named. If no peer comparison is in the documents, write "Not disclosed."
@@ -236,7 +244,8 @@ RULES:
 - No investment advice. No buy/sell/hold language. No verdicts or opinions.
 - Red flags are factual observations, not judgments.
 - Plain English, short sentences.
-- When two documents conflict on the same fact, always use the MORE RECENT document. If the conflict is material (e.g. a legal dispute shown as unresolved in an older doc but resolved in a newer one), note both versions and cite the dates."""
+- When two documents conflict on the same fact, always use the MORE RECENT document. If the conflict is material (e.g. a legal dispute shown as unresolved in an older doc but resolved in a newer one), note both versions and cite the dates.
+- CITATIONS — MANDATORY: After each key figure (IRR, NPV, initial capex, AISC, cash position, reserves/resources in tonnes and contained metal, shares outstanding, annual cash burn, CEO total compensation) you MUST append a citation in this EXACT format: [src:Label, p.N] — where Label is copied EXACTLY from the --- Label --- document header and N is a single page number from the [Page N] markers in that document. CORRECT: "post-tax IRR of 41% [src:Tech_Filing, p.47]". CORRECT: "C$44,808,000 [src:First-Mining-Gold-FS-Q1-2026, p.2]". FORBIDDEN: bare [p.N] with no label — every citation must include the label. FORBIDDEN: page ranges like p.47-48 — use only the starting page. FORBIDDEN: inventing labels — only use labels from the --- Label --- headers. Do not reproduce [Page N] markers anywhere else in your output."""
 
 
 def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
@@ -441,7 +450,7 @@ def generate_overview(company_name: str, pdf_docs: dict[str, str], on_progress=N
     completed = 0
     raw_results = {}
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(_read_one_pdf, (label, url)): label for label, url in pdf_docs.items()}
         for future in as_completed(futures):
             label, text, error = future.result()
