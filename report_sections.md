@@ -46,17 +46,34 @@ This file is the source of truth for what the OVERVIEW_PROMPT in `backend/agent.
 ---
 
 ## 4. Financials
-- Cash on hand (with date)
-- Total debt — broken down long-term vs short-term (with date)
-- Net debt — total debt minus cash
-- Available liquidity — cash + undrawn credit facilities (state facility size, drawn, undrawn)
+
+### 4a. Balance Sheet
+- Every line item in the same order and grouping as the source document
+- All subtotals and totals
+- All figures expressed in millions (e.g. C$126.9M)
+- Report date in section header
+
+### 4b. Cash Flow & Capital
+- Annual cash burn — operating activities only (annualized from most recent period)
+- Annual cash burn — investing activities (MD&A stated budget if disclosed, otherwise annualized)
+- Total cash burn (calc: operating + investing)
+- Cash runway (calc: cash and cash equivalents only ÷ total annual burn, in years)
+- Annual exploration / capital budget (if disclosed in MD&A)
+- LOM net free cash flow (if disclosed — state pre-tax or post-tax)
+
+### 4c. Project Economics *(from most recent technical report / PFS / feasibility)*
+- NPV — all scenarios disclosed (discount rate, metal price assumed, pre-tax or post-tax)
+- IRR — all scenarios disclosed (metal price assumed, pre-tax or post-tax)
+- Payback period
+- Initial capex
+- AISC per oz (if disclosed)
+
+### 4d. Share Structure
 - Shares outstanding (with date)
-- Warrants outstanding (number, expiry, strike price)
-- Options/RSUs/PSUs/DSUs outstanding (totals)
-- Cash burn rate (total cash used in operating activities, per year disclosed)
-- Every financing event: date, type, amount raised, shares issued, warrant coverage
-- Projected annual cash flow / free cash flow (LOM or annual, if disclosed)
-- Annual exploration or capex budget
+- Warrants outstanding
+- Options outstanding
+- RSUs / PSUs / DSUs outstanding (combined)
+- Fully diluted shares (calc: sum of all above)
 
 ---
 

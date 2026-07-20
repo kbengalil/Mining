@@ -107,7 +107,7 @@ def _call_gemini(history: list) -> str:
     return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
-OVERVIEW_PROMPT = """You are the Mining AI Analyst. Produce a structured company overview for {company_name} using the investor documents, company website, recent news, and expert frameworks below.
+OVERVIEW_PROMPT = """You are the Mining AI Analyst. Produce a structured company overview for {company_name} using the investor documents, company website, recent news, and expert frameworks below. Generate this report EXACTLY ONCE — do not restart, repeat, or re-attempt any section under any circumstances.
 
 {rag_context}
 COMPANY WEBSITE (management & about pages):
@@ -143,19 +143,28 @@ From the Management Information Circular (proxy document):
 Also check presentations and fact sheets for: (1) major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail; and (2) the overall shareholder mix breakdown by category (e.g. Retail, Institutional, Management) if disclosed — include this even if no single named shareholder owns >5%.
 
 ## Financials
-Use the most recent financial report available. Present all figures as a two-column markdown table. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Mark any calculated (not directly sourced) figure with "(calc)" in the metric name. If a figure is genuinely not disclosed, write "Not disclosed".
+Use the most recent financial report available. Present all figures as a two-column markdown table. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Express all figures in millions (e.g. C$126.9M, not C$126,892 or C$126,892,000) — financial statements often express figures in thousands, always convert to millions before displaying. Mark any calculated (not directly sourced) figure with "(calc)" in the metric name. If a figure is genuinely not disclosed, write "Not disclosed".
 
 IMPORTANT: Extract and present every line item in EXACTLY the same order and grouping as they appear in the balance sheet. Do not reorder, skip, or combine lines. The user will compare this table side by side with the source document, so the structure must match. Use bold group labels exactly as they appear in the document (e.g. **Assets — Current**, **Assets — Non-current**, **Liabilities — Current**, **Liabilities — Non-current**, **Shareholders' Equity**). Include every subtotal and total line (Total current assets, Total non-current assets, Total assets, Total current liabilities, Total non-current liabilities, Total liabilities, Total shareholders' equity, Total liabilities and shareholders' equity).
 
 Include the report date in the section header (e.g. "As at March 31, 2026").
 
 After the balance sheet table, add a second small table titled **Cash Flow & Capital** with these rows:
-- Annual cash burn (operating activities): from the Statement of Cash Flows — "Cash used in operating activities"
-- **Cash runway (calc)** — Total liquid assets divided by annual cash burn in years (exploration-stage only; omit if development/construction-stage)
-- Annual exploration / capital budget (if disclosed)
+- Annual cash burn — operating activities only (from Statement of Cash Flows: "Cash used in operating activities")
+- Annual cash burn — investing activities only: use the company's stated annual exploration or capital budget if disclosed — check the MD&A narrative first, then the Financial Statements notes (e.g. commitments and contingencies note); otherwise annualize the most recent quarter from the Statement of Cash Flows
+- **Total cash burn (calc)** — sum of operating + investing cash used
+- **Cash runway at total burn (calc)** — Cash and cash equivalents only, divided by total annual cash burn, expressed in years.
+- Annual exploration / capital budget (if disclosed in MD&A or FS notes)
 - LOM net free cash flow (if disclosed) — state pre-tax or post-tax and include currency
 
-After the Cash Flow & Capital table, add a third small table titled **Share Structure** with these rows:
+After the Cash Flow & Capital table, add a third small table titled **Project Economics** with these rows (source: the most recent technical report or PFS/feasibility study ONLY — do NOT use NPV or IRR figures from investor presentations, corporate presentations, or company websites, as these are not NI 43-101 certified):
+- NPV — include ALL discount rate scenarios from the technical report (e.g. 3%, 5%, 7%), gold price assumed, and pre-tax or post-tax — do not omit any scenario
+- IRR — include gold price assumed and pre-tax or post-tax (include ALL scenarios disclosed)
+- Payback period
+- Initial capex
+- AISC (All-In Sustaining Cost) per oz (if disclosed)
+
+After the Project Economics table, add a fourth small table titled **Share Structure** with these rows:
 - Shares outstanding (include the date)
 - Warrants outstanding
 - Options outstanding
@@ -195,7 +204,7 @@ Financials:
 - Is the current cash position disclosed? If not disclosed, flag it.
   - If the company is in EXPLORATION stage (no construction decision made, no project financing arranged): divide cash on hand by the most recent annual cash burn rate (cash used in operating activities) to estimate runway in months. State the calculation explicitly.
   - If the company is in DEVELOPMENT or CONSTRUCTION stage (feasibility complete, project financing arranged, or construction decision announced): do NOT calculate exploration runway — it is misleading. Instead, state total disclosed capex budget vs. total disclosed funding (cash + debt facilities + streaming proceeds + any other committed capital). Flag any funding gap. If construction is paused (permitting, security, or other reasons), state the estimated monthly holding cost (desktop/engineering work only) and how long current cash covers that rate.
-- Any significant debt or outstanding financial obligations?
+- Any significant debt or outstanding financial obligations? If any debt instrument converts to a royalty or stream at maturity rather than requiring cash repayment, describe it as a royalty/stream obligation and explain the conversion mechanism — do not present it as traditional debt.
 - Compare current cash on hand to the total initial capex required for each project. State the gap explicitly and flag if the company has no disclosed plan (debt facility, strategic partner, streaming deal) to finance the difference.
 
 Infrastructure:
@@ -229,8 +238,8 @@ Include: permits, agreements, financings, drill results, project milestones, leg
 For EACH project, extract ALL of the following that are disclosed — do not skip any:
 - Resource: tonnes, grade, contained metal (state M&I and Inferred separately)
 - Reserves: tonnes, grade, contained metal (if stated)
-- NPV: amount, discount rate, commodity price assumed, pre-tax or post-tax. Include ALL sensitivity scenarios disclosed (e.g. base case AND higher price deck) — do not omit any.
-- IRR: % and commodity price assumed. Include ALL sensitivity scenarios disclosed.
+- NPV: amount, discount rate, commodity price assumed, pre-tax or post-tax. Source must be the technical report (NI 43-101 / PFS / feasibility study) only — do not use figures from investor presentations or corporate presentations. Include ALL discount rate scenarios from the technical report (e.g. 3%, 5%, 7%) — do not omit any.
+- IRR: % and commodity price assumed. Source must be the technical report only. Include ALL scenarios disclosed.
 - Initial capex
 - Mine life
 - Average annual production (state the period, e.g. years 1-5 vs LOM)
@@ -375,7 +384,7 @@ def _filter_docs(pdf_docs: dict[str, str]) -> dict[str, str]:
         # Exception: technical reports (NI 43-101) may be the only resource estimate available.
         years_in_label = [int(y) for y in YEAR_IN_LABEL_RE.findall(s)]
         if years_in_label and max(years_in_label) < today.year - 2:
-            if not re.search(r"technical[\s_]report|ni[\s_]*43[-\s]101", s, re.IGNORECASE):
+            if not re.search(r"technical[\s_]report|ni[\s_]*43[-\s]101|pfs|pea|feasibility", s, re.IGNORECASE):
                 continue
 
         # Generic FS/MD&A labels: check URL for year and cap at MAX_FIN_DOCS each

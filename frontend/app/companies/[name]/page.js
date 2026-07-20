@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const API = "http://127.0.0.1:8000";
@@ -33,7 +33,12 @@ const STEP_LABELS = {
 export default function CompanyPage() {
   const { name } = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const companyName = decodeURIComponent(name);
+  const isArchive = companyName.startsWith('_') && companyName.includes('[archived');
+  const baseCompanyName = isArchive
+    ? companyName.replace(/^_/, '').replace(/\s*\[archived[^\]]*\]\s*$/, '').trim()
+    : companyName;
   const existingJobId = searchParams.get("job");
 
   const [pdfs, setPdfs] = useState([]);
@@ -224,10 +229,27 @@ export default function CompanyPage() {
   }
 
   async function regenerateFromUploaded() {
-    const res = await fetch(`${API}/companies/${encodeURIComponent(companyName)}/documents/uploaded`);
-    const data = await res.json();
-    const docs = data.documents || {};
-    if (Object.keys(docs).length > 0) regenerate(docs);
+    if (isArchive) {
+      // On an archive page: use the already-loaded pdfUrls (from source_urls) — no re-upload needed
+      const docs = pdfUrls;
+      if (Object.keys(docs).length === 0) {
+        router.push(`/companies/${encodeURIComponent(baseCompanyName)}`);
+        return;
+      }
+      fetch(`${API}/companies/${encodeURIComponent(baseCompanyName)}/overview/start-manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docs, company_url: null }),
+      })
+        .then((r) => r.json())
+        .then((d) => router.push(`/companies/${encodeURIComponent(baseCompanyName)}?job=${d.job_id}`))
+        .catch((e) => alert("Failed to start regeneration"));
+      return;
+    }
+    // Auto-archive existing report before regenerating (ignore 404 if none exists)
+    await fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/archive`, { method: "POST" }).catch(() => {});
+    // Use already-loaded pdfUrls so we regenerate with the exact same docs
+    if (Object.keys(pdfUrls).length > 0) regenerate(pdfUrls);
     else startAnalysis();
   }
 

@@ -382,6 +382,18 @@ def start_overview_manual(company_name: str, body: ManualDocsRequest, background
     return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": pdf_list, "pdf_urls": pdf_docs}
 
 
+class MarkdownUpdateRequest(BaseModel):
+    overview_markdown: str
+
+@app.patch("/companies/{company_name}/overview/markdown")
+def update_overview_markdown(company_name: str, body: MarkdownUpdateRequest):
+    existing = supabase.table("company_overviews").select("id").eq("company_name", company_name).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="No report found")
+    supabase.table("company_overviews").update({"overview_markdown": body.overview_markdown}).eq("company_name", company_name).execute()
+    return {"updated": company_name}
+
+
 @app.delete("/companies/{company_name}/overview")
 def delete_overview(company_name: str):
     supabase.table("company_overviews").delete().eq("company_name", company_name).execute()
