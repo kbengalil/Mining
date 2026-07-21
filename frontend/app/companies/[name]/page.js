@@ -302,6 +302,11 @@ export default function CompanyPage() {
 
   return (
     <main className="max-w-2xl mx-auto p-8">
+      <div className="mb-4">
+        <Link href="/" className="text-sm text-gray-500 hover:text-gray-800 transition-colors">
+          ← Home
+        </Link>
+      </div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">{companyName}</h1>
         <div className="flex gap-2">
@@ -321,38 +326,6 @@ export default function CompanyPage() {
               ⏹ Stop
             </button>
           )}
-          {(status === "cached" || status === "done") && (
-            <button
-              onClick={regenerateFromUploaded}
-              className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
-            >
-              ↻ Regenerate
-            </button>
-          )}
-          {(status === "cached" || status === "done") && (
-            <button
-              onClick={() => {
-                if (!confirm(`Archive report for ${companyName}?`)) return;
-                fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview/archive`, { method: "POST" })
-                  .then(r => r.json())
-                  .then(d => {
-                    const urls = d.source_urls || [];
-                    const docs = {};
-                    urls.forEach(url => {
-                      const label = decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, "").split("?")[0]);
-                      if (label) docs[label] = url;
-                    });
-                    if (confirm(`Archived as: ${d.archived_as}\n\nRegenerate now with the same documents?`)) {
-                      regenerate(Object.keys(docs).length > 0 ? docs : null);
-                    }
-                  })
-                  .catch(() => alert("Archive failed"));
-              }}
-              className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
-            >
-              📦 Archive
-            </button>
-          )}
           {status !== "running" && status !== "starting" && (
             <button
               onClick={() => {
@@ -361,9 +334,9 @@ export default function CompanyPage() {
                   .then((r) => { if (r.ok) window.location.href = "/"; else alert("Delete failed"); })
                   .catch(() => alert("Delete failed"));
               }}
-              className="text-sm px-4 py-2 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+              className="text-xl px-3 py-2 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
             >
-              🗑 Delete
+              🗑
             </button>
           )}
           <Link
@@ -373,10 +346,16 @@ export default function CompanyPage() {
             📊 Charts
           </Link>
           <Link
-            href="/"
+            href={`/companies/${encodeURIComponent(companyName)}/timeline`}
             className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
           >
-            ← Back to Chat
+            📈 Time Series
+          </Link>
+          <Link
+            href={`/companies/${encodeURIComponent(companyName)}/insider-ownership`}
+            className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            🏛 Insider Ownership
           </Link>
         </div>
       </div>

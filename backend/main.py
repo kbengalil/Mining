@@ -73,7 +73,7 @@ def get_cached_overview(company_name: str):
         label = raw[:-4] if raw.lower().endswith(".pdf") else raw
         if label:
             pdf_docs[label] = url
-    data["selected_urls"] = list(_filter_docs(pdf_docs).values())
+    data["selected_urls"] = source_urls
     return data
 
 
@@ -104,42 +104,411 @@ def _list_all_storage_paths(prefix: str) -> list[str]:
 @app.post("/companies/{company_name}/documents/upload")
 async def upload_documents(company_name: str, files: List[UploadFile] = File(...)):
     slug = _company_slug(company_name)
+    folder = f"{slug}/main"
 
-    # Wipe existing folder so the new upload is the only source of truth
-    existing_paths = _list_all_storage_paths(slug)
+    # Wipe only the main folder — timeline docs are untouched
+    existing_paths = _list_all_storage_paths(folder)
     if existing_paths:
         supabase.storage.from_("documents").remove(existing_paths)
-        print(f"  [Upload] Deleted {len(existing_paths)} existing files from {slug}/")
+        print(f"  [Upload] Deleted {len(existing_paths)} existing files from {folder}/")
 
     uploaded = {}
     for file in files:
         content = await file.read()
-        filename = file.filename
-        storage_path = f"{slug}/{filename}"
+        basename = file.filename.split("/")[-1].split("\\")[-1]
+        storage_path = f"{folder}/{basename}"
         supabase.storage.from_("documents").upload(
             storage_path,
             content,
             file_options={"content-type": "application/pdf", "upsert": "true"},
         )
         url = supabase.storage.from_("documents").get_public_url(storage_path)
-        label = filename[:-4] if filename.lower().endswith(".pdf") else filename
+        label = basename[:-4] if basename.lower().endswith(".pdf") else basename
         uploaded[label] = url
-        print(f"  [Upload] Stored {filename} → {url}")
+        print(f"  [Upload] Stored {basename} → {url}")
     return {"documents": uploaded}
+
+
+@app.post("/companies/{company_name}/timeline/upload")
+async def upload_timeline_documents(company_name: str, files: List[UploadFile] = File(...)):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/timeline"
+    uploaded = {}
+    for file in files:
+        content = await file.read()
+        # Strip any folder prefix the browser adds (e.g. "Time line/filename.pdf" → "filename.pdf")
+        basename = file.filename.split("/")[-1].split("\\")[-1]
+        storage_path = f"{folder}/{basename}"
+        supabase.storage.from_("documents").upload(
+            storage_path,
+            content,
+            file_options={"content-type": "application/pdf", "upsert": "true"},
+        )
+        url = supabase.storage.from_("documents").get_public_url(storage_path)
+        label = basename[:-4] if basename.lower().endswith(".pdf") else basename
+        uploaded[label] = url
+        print(f"  [Timeline Upload] Stored {basename} → {url}")
+    return {"documents": uploaded}
+
+
+AIF_PROMPT = """Extract insider ownership data from this Annual Information Form (AIF). Return ONLY a JSON object with these exact fields:
+{
+  "period": "AIF 2024",
+  "period_end_date": "2024-12-31",
+  "cash": null,
+  "cash_currency": null,
+  "financial_liabilities": null,
+  "shares_outstanding": null,
+  "exploration_spend": null,
+  "quarterly_ga": null,
+  "insider_ownership_pct": null
+}
+Rules:
+- insider_ownership_pct: total percentage of shares held or controlled by ALL directors and officers combined. Look for a table of insider holdings with a total row or stated percentage. Sum all individual director/officer rows if no total is given.
+- period: "AIF YYYY" where YYYY is the fiscal year the AIF covers (e.g. "AIF 2024")
+- period_end_date: YYYY-12-31 for the fiscal year end
+- All other fields must be null.
+Return ONLY the JSON, no other text."""
+
+
+TIMELINE_PROMPT = """Extract financial data from this financial statement. Return ONLY a JSON object with these exact fields:
+{
+  "period": "Q1 2024",
+  "period_end_date": "2024-03-31",
+  "cash": 7.7,
+  "cash_currency": "C$",
+  "financial_liabilities": 38.2,
+  "shares_outstanding": 918.4,
+  "exploration_spend": 3.1,
+  "quarterly_ga": 2.0
+}
+Rules:
+- period: quarter + year (e.g. Q1 2024, Q2 2024, Q3 2024, Q4 2024)
+- period_end_date: ISO date YYYY-MM-DD (the balance sheet date)
+- cash: cash and cash equivalents only, at the balance sheet date, in millions
+- cash_currency: C$ or US$
+- financial_liabilities: ALL financial liabilities at the balance sheet date, in millions. Include: notes payable, secured notes, debentures, convertible notes, Silver Stream derivative liability, royalty/stream derivative liabilities, lease obligations, option liabilities. Do NOT include trade payables or accrued liabilities. Sum all qualifying items. Use 0 only if there are genuinely no financial liabilities.
+- shares_outstanding: common shares issued and outstanding at the balance sheet date (period-end count, NOT weighted average used in EPS), in millions
+- exploration_spend: cash spent on mineral property acquisition, exploration and evaluation, or development activities, in millions. Source: cash flow statement INVESTING ACTIVITIES section only (look for "mineral property expenditures", "acquisition of mineral properties", "exploration and evaluation expenditures"). Do NOT use the income statement "exploration and evaluation" expense line — that is a different, much smaller number. The cash flow statement may show cumulative year-to-date figures: determine how many quarters the statement covers from its header ("three months" = 1 quarter, "six months" = 2 quarters, "nine months" = 3 quarters, "year ended" = 4 quarters), then divide the cumulative figure by the number of quarters to get a per-quarter average. Always a positive number.
+- quarterly_ga: general and administrative / corporate costs for the QUARTER (three months), in millions. Use the "three months ended" column from the income statement if available. For annual statements divide the annual figure by 4. Always a positive number.
+- insider_ownership_pct: ONLY extract this from a Management Information Circular (MIC) or proxy circular. It is the total percentage of shares held or controlled by ALL directors and officers combined. Look for a table showing insider holdings and a total row or stated percentage. For financial statements (FS, MD&A, AIF), leave this null.
+- Use null for any value not found. Return ONLY the JSON, no other text."""
+
+
+timeline_jobs: dict[str, dict] = {}
+
+
+def run_timeline_job(job_id: str, slug: str, pdf_paths: list):
+    import json as _json
+    job = timeline_jobs[job_id]
+    folder = f"{slug}/timeline"
+    key = os.environ["GEMINI_API_KEY"]
+    results = []
+
+    for i, storage_path in enumerate(pdf_paths):
+        if job.get("status") == "cancelled":
+            return
+
+        clean_name = storage_path.split("/")[-1]
+        job["current"] = i + 1
+        job["label"] = clean_name
+
+        url = supabase.storage.from_("documents").get_public_url(storage_path)
+
+        period_hint, date_hint = None, None
+        is_mic = bool(re.search(r"circular|proxy|\bmic\b", clean_name, re.IGNORECASE))
+        m = re.search(r"(Q[1-4])[-_](\d{4})", clean_name, re.IGNORECASE)
+        if m:
+            q, yr = m.group(1).upper(), m.group(2)
+            period_hint = f"{q} {yr}"
+            month = {"Q1": "03", "Q2": "06", "Q3": "09", "Q4": "12"}[q]
+            last_day = {"Q1": "31", "Q2": "30", "Q3": "30", "Q4": "31"}[q]
+            date_hint = f"{yr}-{month}-{last_day}"
+        elif is_mic:
+            yr_m = re.search(r"(\d{4})", clean_name)
+            if yr_m:
+                yr = yr_m.group(1)
+                period_hint = f"AGM {yr}"
+                date_hint = f"{yr}-06-30"
+
+        try:
+            from agent import _extract_text
+            pdf_bytes = fetch_pdf_bytes(url)
+            text = _extract_text(pdf_bytes)
+            hint_note = f"\nNOTE: This file is named '{clean_name}'. The period is {period_hint} and the balance sheet date is {date_hint}. Use these if the document is ambiguous.\n" if period_hint else ""
+            resp = http.post(
+                f"{GEMINI_URL}?key={key}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": f"{TIMELINE_PROMPT}{hint_note}\n\n{text[:60000]}"}]}],
+                    "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            extracted = _json.loads(resp.json()["candidates"][0]["content"]["parts"][0]["text"])
+            if period_hint:
+                extracted["period"] = period_hint
+                extracted["period_end_date"] = date_hint
+            extracted["filename"] = clean_name
+            results.append(extracted)
+        except Exception as e:
+            results.append({"filename": clean_name, "period": period_hint, "period_end_date": date_hint, "error": str(e)})
+
+    results.sort(key=lambda x: x.get("period_end_date") or "")
+
+    results_bytes = _json.dumps(results).encode()
+    try:
+        supabase.storage.from_("documents").remove([f"{folder}/results.json"])
+    except Exception:
+        pass
+    supabase.storage.from_("documents").upload(
+        f"{folder}/results.json", results_bytes,
+        file_options={"content-type": "application/json", "upsert": "true"},
+    )
+    job["status"] = "done"
+    job["data"] = results
+
+
+@app.post("/companies/{company_name}/timeline/analyze")
+def analyze_timeline(company_name: str, background_tasks: BackgroundTasks):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/timeline"
+
+    all_paths = _list_all_storage_paths(folder)
+    pdf_paths = sorted([p for p in all_paths if p.lower().endswith(".pdf")])
+
+    if not pdf_paths:
+        raise HTTPException(status_code=404, detail="No timeline documents found. Please upload first.")
+
+    job_id = str(uuid.uuid4())
+    timeline_jobs[job_id] = {"status": "running", "current": 0, "total": len(pdf_paths), "label": "Starting..."}
+    background_tasks.add_task(run_timeline_job, job_id, slug, pdf_paths)
+    return {"job_id": job_id, "total": len(pdf_paths)}
+
+
+@app.get("/companies/{company_name}/timeline/jobs/{job_id}")
+def get_timeline_job(job_id: str):
+    job = timeline_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.post("/companies/{company_name}/timeline/jobs/{job_id}/cancel")
+def cancel_timeline_job(job_id: str):
+    job = timeline_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job["status"] = "cancelled"
+    return {"status": "cancelled"}
+
+
+@app.get("/companies/{company_name}/timeline/files")
+def get_timeline_files(company_name: str):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/timeline"
+    all_paths = _list_all_storage_paths(folder)
+    names = [p.split("/")[-1] for p in all_paths if p.lower().endswith(".pdf")]
+    return {"files": sorted(names)}
+
+
+@app.delete("/companies/{company_name}/timeline")
+def delete_timeline(company_name: str):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/timeline"
+    all_paths = _list_all_storage_paths(folder)
+    if all_paths:
+        supabase.storage.from_("documents").remove(all_paths)
+    return {"deleted": len(all_paths)}
+
+
+@app.get("/companies/{company_name}/timeline/data")
+def get_timeline_data(company_name: str):
+    slug = _company_slug(company_name)
+    url = supabase.storage.from_("documents").get_public_url(f"{slug}/timeline/results.json")
+    try:
+        resp = http.get(url, timeout=10)
+        resp.raise_for_status()
+        return {"data": resp.json()}
+    except Exception:
+        raise HTTPException(status_code=404, detail="No timeline data yet. Click Analyze.")
+
+
+insider_ownership_jobs: dict[str, dict] = {}
+
+
+def run_insider_ownership_job(job_id: str, slug: str, pdf_paths: list):
+    import json as _json
+    job = insider_ownership_jobs[job_id]
+    folder = f"{slug}/insider-ownership"
+    key = os.environ["GEMINI_API_KEY"]
+    results = []
+
+    for i, storage_path in enumerate(pdf_paths):
+        if job.get("status") == "cancelled":
+            return
+
+        clean_name = storage_path.split("/")[-1]
+        job["current"] = i + 1
+        job["label"] = clean_name
+
+        url = supabase.storage.from_("documents").get_public_url(storage_path)
+
+        period_hint, date_hint = None, None
+        yr_m = re.search(r"(\d{4})", clean_name)
+        if yr_m:
+            yr = yr_m.group(1)
+            period_hint = f"AIF {yr}"
+            date_hint = f"{yr}-12-31"
+
+        try:
+            from agent import _extract_text
+            pdf_bytes = fetch_pdf_bytes(url)
+            text = _extract_text(pdf_bytes)
+            # AIFs are large (100+ pages); the ownership disclosure is usually near the
+            # end, well past a fixed truncation point, so locate it instead of guessing.
+            section_match = re.search(r"ownership of securities", text, re.IGNORECASE)
+            if not section_match:
+                section_match = re.search(r"directors and (?:executive officers|officers) as a group", text, re.IGNORECASE)
+            if section_match:
+                start = max(0, section_match.start() - 1000)
+                excerpt = text[start:start + 10000]
+            else:
+                excerpt = text[:60000]
+            hint_note = f"\nNOTE: This file is named '{clean_name}'. The period is {period_hint} and the balance sheet date is {date_hint}. Use these if the document is ambiguous.\n" if period_hint else ""
+            resp = http.post(
+                f"{GEMINI_URL}?key={key}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": f"{AIF_PROMPT}{hint_note}\n\n{excerpt}"}]}],
+                    "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            extracted = _json.loads(resp.json()["candidates"][0]["content"]["parts"][0]["text"])
+            if period_hint:
+                extracted["period"] = period_hint
+                extracted["period_end_date"] = date_hint
+            extracted["filename"] = clean_name
+            results.append(extracted)
+        except Exception as e:
+            results.append({"filename": clean_name, "period": period_hint, "period_end_date": date_hint, "error": str(e)})
+
+    results.sort(key=lambda x: x.get("period_end_date") or "")
+
+    results_bytes = _json.dumps(results).encode()
+    try:
+        supabase.storage.from_("documents").remove([f"{folder}/results.json"])
+    except Exception:
+        pass
+    supabase.storage.from_("documents").upload(
+        f"{folder}/results.json", results_bytes,
+        file_options={"content-type": "application/json", "upsert": "true"},
+    )
+    job["status"] = "done"
+    job["data"] = results
+
+
+@app.post("/companies/{company_name}/insider-ownership/upload")
+async def upload_insider_ownership_documents(company_name: str, files: List[UploadFile] = File(...)):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/insider-ownership"
+    uploaded = {}
+    for file in files:
+        content = await file.read()
+        basename = file.filename.split("/")[-1].split("\\")[-1]
+        storage_path = f"{folder}/{basename}"
+        supabase.storage.from_("documents").upload(
+            storage_path,
+            content,
+            file_options={"content-type": "application/pdf", "upsert": "true"},
+        )
+        url = supabase.storage.from_("documents").get_public_url(storage_path)
+        label = basename[:-4] if basename.lower().endswith(".pdf") else basename
+        uploaded[label] = url
+        print(f"  [Insider Ownership Upload] Stored {basename} → {url}")
+    return {"documents": uploaded}
+
+
+@app.post("/companies/{company_name}/insider-ownership/analyze")
+def analyze_insider_ownership(company_name: str, background_tasks: BackgroundTasks):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/insider-ownership"
+
+    all_paths = _list_all_storage_paths(folder)
+    pdf_paths = sorted([p for p in all_paths if p.lower().endswith(".pdf")])
+
+    if not pdf_paths:
+        raise HTTPException(status_code=404, detail="No insider ownership documents found. Please upload first.")
+
+    job_id = str(uuid.uuid4())
+    insider_ownership_jobs[job_id] = {"status": "running", "current": 0, "total": len(pdf_paths), "label": "Starting..."}
+    background_tasks.add_task(run_insider_ownership_job, job_id, slug, pdf_paths)
+    return {"job_id": job_id, "total": len(pdf_paths)}
+
+
+@app.get("/companies/{company_name}/insider-ownership/jobs/{job_id}")
+def get_insider_ownership_job(job_id: str):
+    job = insider_ownership_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.post("/companies/{company_name}/insider-ownership/jobs/{job_id}/cancel")
+def cancel_insider_ownership_job(job_id: str):
+    job = insider_ownership_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job["status"] = "cancelled"
+    return {"status": "cancelled"}
+
+
+@app.get("/companies/{company_name}/insider-ownership/files")
+def get_insider_ownership_files(company_name: str):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/insider-ownership"
+    all_paths = _list_all_storage_paths(folder)
+    names = [p.split("/")[-1] for p in all_paths if p.lower().endswith(".pdf")]
+    return {"files": sorted(names)}
+
+
+@app.delete("/companies/{company_name}/insider-ownership")
+def delete_insider_ownership(company_name: str):
+    slug = _company_slug(company_name)
+    folder = f"{slug}/insider-ownership"
+    all_paths = _list_all_storage_paths(folder)
+    if all_paths:
+        supabase.storage.from_("documents").remove(all_paths)
+    return {"deleted": len(all_paths)}
+
+
+@app.get("/companies/{company_name}/insider-ownership/data")
+def get_insider_ownership_data(company_name: str):
+    slug = _company_slug(company_name)
+    url = supabase.storage.from_("documents").get_public_url(f"{slug}/insider-ownership/results.json")
+    try:
+        resp = http.get(url, timeout=10)
+        resp.raise_for_status()
+        return {"data": resp.json()}
+    except Exception:
+        raise HTTPException(status_code=404, detail="No insider ownership data yet. Click Analyze.")
 
 
 @app.get("/companies/{company_name}/documents/uploaded")
 def get_uploaded_documents(company_name: str):
     slug = _company_slug(company_name)
     try:
-        files = supabase.storage.from_("documents").list(slug)
+        all_paths = _list_all_storage_paths(f"{slug}/main")
         docs = {}
-        for f in (files or []):
-            name = f["name"]
-            if not name.lower().endswith(".pdf"):
+        for path in all_paths:
+            if not path.lower().endswith(".pdf"):
                 continue
+            name = path.split("/")[-1]
             label = name[:-4]
-            url = supabase.storage.from_("documents").get_public_url(f"{slug}/{name}")
+            url = supabase.storage.from_("documents").get_public_url(path)
             docs[label] = url
         return {"documents": docs}
     except Exception as e:
@@ -227,30 +596,13 @@ def _save_overview(company_name: str, overview_md: str, current_urls: list[str])
         supabase.table("company_overviews").insert(insert_data).execute()
 
 
-def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_urls: list[str], crawl_url: str | None = None, skip_filter: bool = False):
+def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_urls: list[str], skip_filter: bool = False):
     job = overview_jobs[job_id]
 
     def on_progress(info: dict):
         job.update(info)
 
     try:
-        if crawl_url:
-            job["label"] = "Crawling investor pages..."
-            discovered = discover_company(company_name, base_url=crawl_url)
-            if discovered:
-                dynamic_companies[company_name] = discovered
-                result = find_pdf_links(company_name, dynamic_companies)
-                pdf_docs = result["documents"]
-                current_urls = sorted(pdf_docs.values())
-                job["pdfs"] = list(pdf_docs.keys())
-                job["pdf_urls"] = dict(pdf_docs)
-                job["total"] = len(pdf_docs)
-                job["selected_pdfs"] = list(_filter_docs(pdf_docs).keys())
-            else:
-                job["status"] = "error"
-                job["error"] = "Could not find investor documents for this company."
-                return
-
         if job.get("status") == "cancelled":
             return
 
@@ -287,45 +639,34 @@ def run_overview_job(job_id: str, company_name: str, pdf_docs: dict, current_url
 
 @app.post("/companies/{company_name}/overview/start")
 def start_overview(company_name: str, background_tasks: BackgroundTasks, force: bool = False):
-    from urllib.parse import urlparse
+    # Read uploaded docs from Supabase Storage — main folder only, never timeline
+    slug = _company_slug(company_name)
+    all_paths = _list_all_storage_paths(f"{slug}/main")
+    pdf_docs = {}
+    for path in all_paths:
+        if not path.lower().endswith(".pdf"):
+            continue
+        name = path.split("/")[-1]
+        label = name[:-4]
+        url = supabase.storage.from_("documents").get_public_url(path)
+        pdf_docs[label] = url
 
-    # Determine if a fresh crawl is needed (dynamic company not in memory)
-    needs_crawl = False
-    crawl_url = None
-    if company_name not in COMPANIES:
-        company_info = dynamic_companies.get(company_name, {})
-        if not company_info.get("investor_pages"):
-            # Server restarted or placeholder — recover base_url from Supabase source_urls
-            crawl_url = company_info.get("base_url")
-            if not crawl_url:
-                cached = supabase.table("company_overviews").select("source_urls").eq("company_name", company_name).limit(1).execute()
-                if cached.data and cached.data[0].get("source_urls"):
-                    first_url = cached.data[0]["source_urls"][0]
-                    p = urlparse(first_url)
-                    crawl_url = f"{p.scheme}://{p.netloc}"
-                else:
-                    raise HTTPException(status_code=404, detail="Unknown company — paste the URL in chat to analyze")
-            dynamic_companies[company_name] = {"base_url": crawl_url, "investor_pages": [], "about_pages": [], "news_page": "/news/"}
-            needs_crawl = True
+    if not pdf_docs:
+        raise HTTPException(status_code=404, detail="No uploaded documents found. Please upload documents first.")
 
-    if needs_crawl:
-        pdf_docs, current_urls, pdf_list, selected_pdfs = {}, [], [], []
-    else:
-        result = find_pdf_links(company_name, dynamic_companies)
-        pdf_docs = result["documents"]
-        current_urls = sorted(pdf_docs.values())
-        pdf_list = list(pdf_docs.keys())
-        selected_pdfs = list(_filter_docs(pdf_docs).keys())
+    current_urls = sorted(pdf_docs.values())
+    pdf_list = list(pdf_docs.keys())
+    selected_pdfs = list(_filter_docs(pdf_docs).keys())
 
-        if not force:
-            existing = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
-            if existing.data and sorted(existing.data[0]["source_urls"]) == current_urls:
-                return {
-                    "cached": True,
-                    "overview_markdown": existing.data[0]["overview_markdown"],
-                    "pdfs": pdf_list,
-                    "selected_pdfs": selected_pdfs,
-                }
+    if not force:
+        existing = supabase.table("company_overviews").select("*").eq("company_name", company_name).limit(1).execute()
+        if existing.data and sorted(existing.data[0]["source_urls"]) == current_urls:
+            return {
+                "cached": True,
+                "overview_markdown": existing.data[0]["overview_markdown"],
+                "pdfs": pdf_list,
+                "selected_pdfs": selected_pdfs,
+            }
 
     job_id = str(uuid.uuid4())
     overview_jobs[job_id] = {
@@ -339,7 +680,7 @@ def start_overview(company_name: str, background_tasks: BackgroundTasks, force: 
         "pdf_urls": pdf_docs,
     }
     active_jobs_by_company[company_name] = job_id
-    background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, crawl_url)
+    background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls)
     return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": selected_pdfs, "pdf_urls": pdf_docs, "cached": False}
 
 
@@ -378,7 +719,7 @@ def start_overview_manual(company_name: str, body: ManualDocsRequest, background
         "pdfs": pdf_list, "selected_pdfs": pdf_list, "pdf_urls": pdf_docs,
     }
     active_jobs_by_company[company_name] = job_id
-    background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, None, True)
+    background_tasks.add_task(run_overview_job, job_id, company_name, pdf_docs, current_urls, True)
     return {"job_id": job_id, "pdfs": pdf_list, "selected_pdfs": pdf_list, "pdf_urls": pdf_docs}
 
 
