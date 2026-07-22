@@ -301,12 +301,82 @@ export default function CompanyPage() {
   const currentStepIndex = job ? STEPS.indexOf(job.step) : 0;
 
   return (
-    <main className="max-w-2xl mx-auto p-8">
-      <div className="mb-4">
-        <Link href="/" className="text-sm text-gray-500 hover:text-gray-800 transition-colors">
-          ← Home
+    <>
+      {/* Charts / Time Series / Insider Ownership — sits in the right gutter on wide screens */}
+      <div className="hidden xl:flex flex-col gap-2 fixed right-8 top-8 w-40">
+        <Link
+          href={`/companies/${encodeURIComponent(companyName)}/charts`}
+          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-center"
+        >
+          📊 Charts
+        </Link>
+        <Link
+          href={`/companies/${encodeURIComponent(companyName)}/timeline`}
+          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-center"
+        >
+          📈 Time Series
+        </Link>
+        <Link
+          href={`/companies/${encodeURIComponent(companyName)}/insider-ownership`}
+          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-center"
+        >
+          🏛 Insider Ownership
         </Link>
       </div>
+      {/* Home + Delete + Documents list — sits in the left gutter on wide screens */}
+      <div className="hidden xl:block fixed left-8 top-8 w-64">
+        <div className="flex items-center gap-3 mb-6">
+          <Link href="/" className="text-sm text-gray-500 hover:text-gray-800 transition-colors">
+            ← Home
+          </Link>
+          {status !== "running" && status !== "starting" && (
+            <button
+              onClick={() => {
+                if (!confirm(`Delete report for ${companyName}?`)) return;
+                fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`, { method: "DELETE" })
+                  .then((r) => { if (r.ok) window.location.href = "/"; else alert("Delete failed"); })
+                  .catch(() => alert("Delete failed"));
+              }}
+              className="text-sm px-2 py-1 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+            >
+              🗑
+            </button>
+          )}
+        </div>
+        {pdfs.length > 0 && (status === "done" || status === "cached") && (
+          <>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+              Documents found ({pdfs.length})
+              {selectedPdfs.length > 0 && (
+                <span className="block mt-1 text-green-600 normal-case font-normal">
+                  {selectedPdfs.length} used for analysis
+                </span>
+              )}
+            </p>
+            <ul className="space-y-1">
+              {pdfs.map((label, i) => {
+                const isSelected = selectedPdfs.includes(label);
+                return (
+                  <li key={i} className={`text-sm flex items-center gap-2 ${isSelected ? "text-gray-800" : "text-gray-400"}`}>
+                    <span className={isSelected ? "text-green-500 font-bold" : "text-gray-300"}>
+                      {isSelected ? "✓" : "—"}
+                    </span>
+                    {pdfUrls[label] ? (
+                      <a href={pdfUrls[label]} target="_blank" rel="noopener noreferrer"
+                        className={`hover:underline break-all ${isSelected ? "font-medium" : ""}`}>
+                        {label} ↗
+                      </a>
+                    ) : (
+                      <span className={`break-all ${isSelected ? "font-medium" : ""}`}>{label}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </div>
+      <main className="max-w-2xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">{companyName}</h1>
         <div className="flex gap-2">
@@ -326,79 +396,11 @@ export default function CompanyPage() {
               ⏹ Stop
             </button>
           )}
-          {status !== "running" && status !== "starting" && (
-            <button
-              onClick={() => {
-                if (!confirm(`Delete report for ${companyName}?`)) return;
-                fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`, { method: "DELETE" })
-                  .then((r) => { if (r.ok) window.location.href = "/"; else alert("Delete failed"); })
-                  .catch(() => alert("Delete failed"));
-              }}
-              className="text-xl px-3 py-2 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
-            >
-              🗑
-            </button>
-          )}
-          <Link
-            href={`/companies/${encodeURIComponent(companyName)}/charts`}
-            className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            📊 Charts
-          </Link>
-          <Link
-            href={`/companies/${encodeURIComponent(companyName)}/timeline`}
-            className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            📈 Time Series
-          </Link>
-          <Link
-            href={`/companies/${encodeURIComponent(companyName)}/insider-ownership`}
-            className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            🏛 Insider Ownership
-          </Link>
         </div>
       </div>
 
       {status === "error" && (
         <div className="bg-red-50 text-red-700 rounded-lg p-4 text-sm mb-6">{error}</div>
-      )}
-
-      {/* PDF list — only show once the report is ready */}
-      {pdfs.length > 0 && (status === "done" || status === "cached") && (
-        <div className="mb-8">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-            Documents found ({pdfs.length})
-            {selectedPdfs.length > 0 && (
-              <span className="ml-2 text-green-600 normal-case font-normal">
-                · {selectedPdfs.length} used for analysis
-              </span>
-            )}
-          </p>
-          <ul className="space-y-1">
-            {pdfs.map((label, i) => {
-              const isSelected = selectedPdfs.includes(label);
-              return (
-                <li key={i} className={`text-sm flex items-center gap-2 ${isSelected ? "text-gray-800" : "text-gray-400"}`}>
-                  <span className={isSelected ? "text-green-500 font-bold" : "text-gray-300"}>
-                    {isSelected ? "✓" : "—"}
-                  </span>
-                  {pdfUrls[label] ? (
-                    <a href={pdfUrls[label]} target="_blank" rel="noopener noreferrer"
-                      className={`hover:underline ${isSelected ? "font-medium" : ""}`}>
-                      {label} ↗
-                    </a>
-                  ) : (
-                    <span className={isSelected ? "font-medium" : ""}>{label}</span>
-                  )}
-                  {isSelected && (
-                    <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded">used</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
       )}
 
       {/* Progress */}
@@ -531,16 +533,14 @@ export default function CompanyPage() {
       {/* Overview */}
       {(status === "done" || status === "cached") && overview && (
         <>
-          {status === "cached" && (
-            <p className="text-xs text-gray-400 mb-4">Loaded from cache — regenerates automatically when new documents are found.</p>
-          )}
           {status === "done" && finalTime !== null && (
             <p className="text-xs text-gray-400 mb-4">Generated in {formatTime(finalTime)}</p>
           )}
           <OverviewRenderer markdown={overview} pdfUrls={pdfUrls} />
         </>
       )}
-    </main>
+      </main>
+    </>
   );
 }
 
@@ -570,12 +570,43 @@ function makeParseInline(pdfUrls) {
   };
 }
 
+const REPORT_TABS = [
+  { label: "Company Snapshot", sections: ["Company Snapshot", "Strategic Outlook"] },
+  { label: "The Team", sections: ["The Team"] },
+  { label: "Financials", sections: ["Financials"] },
+  { label: "Recent Developments", sections: ["Recent Developments"] },
+  { label: "Red Flags", sections: ["Red Flags"] },
+  { label: "Key Project Metrics", sections: ["Key Project Metrics"] },
+  { label: "Valuation vs Peers", sections: ["Valuation vs Peers"] },
+];
+
 function OverviewRenderer({ markdown, pdfUrls }) {
   const parseInline = makeParseInline(pdfUrls);
-  const sections = markdown.split(/\n(?=## )/).filter(Boolean);
+  const allSections = markdown.split(/\n(?=## )/).filter(Boolean);
+  const [activeTab, setActiveTab] = useState(0);
+
+  const sectionTitle = (section) => section.trim().split("\n")[0].replace(/^##\s*/, "").trim();
+  const activeTitles = REPORT_TABS[activeTab].sections;
+  const sections = allSections.filter((s) => activeTitles.includes(sectionTitle(s)));
 
   return (
-    <div className="space-y-6">
+    <div>
+      <div className="flex flex-wrap gap-2 mb-6">
+        {REPORT_TABS.map((tab, i) => (
+          <button
+            key={tab.label}
+            onClick={() => setActiveTab(i)}
+            className={`text-sm px-4 py-2 rounded-lg border transition-colors ${
+              i === activeTab
+                ? "bg-blue-600 text-white border-blue-600"
+                : "border-gray-300 text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="space-y-6">
       {sections.map((section, i) => {
         const lines = section.trim().split("\n");
         const title = lines[0].replace(/^##\s*/, "").trim();
@@ -637,6 +668,7 @@ function OverviewRenderer({ markdown, pdfUrls }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -186,7 +186,7 @@ export default function InsiderOwnershipPage() {
       </div>
 
       <h1 className="text-2xl font-bold mb-1">{companyName}</h1>
-      <p className="text-sm text-gray-500 mb-8">Insider Ownership — by AIF Year</p>
+      <p className="text-sm text-gray-500 mb-8">Insider Ownership & CEO Compensation — by Year</p>
 
       {/* Upload area */}
       <div
@@ -203,9 +203,9 @@ export default function InsiderOwnershipPage() {
         />
         <p className="text-3xl mb-2">📂</p>
         <p className="text-sm font-medium text-gray-700">
-          {uploading ? "Uploading..." : "Click to select your AIF folder"}
+          {uploading ? "Uploading..." : "Click to select your AIF/MIC folder"}
         </p>
-        <p className="text-xs text-gray-400 mt-1">Include AIF files only — all PDFs will be uploaded</p>
+        <p className="text-xs text-gray-400 mt-1">Include AIF and MIC/proxy files — all PDFs will be uploaded</p>
       </div>
 
       {uploadedFiles.length > 0 && (
@@ -266,19 +266,30 @@ export default function InsiderOwnershipPage() {
         <div className="bg-red-50 text-red-700 rounded-lg p-3 text-sm mb-6">{error}</div>
       )}
 
-      {/* Chart */}
+      {/* Charts */}
       {hasData && (
         <div className="mt-8 border-t pt-8">
           <p className="text-sm font-semibold text-gray-700 mb-6">
-            {ownershipData.length} AIF{ownershipData.length > 1 ? "s" : ""} analyzed
+            {ownershipData.length} document{ownershipData.length > 1 ? "s" : ""} analyzed
           </p>
-          <BarChart
-            data={ownershipData.filter((d) => d.insider_ownership_pct != null)}
-            valueKey="insider_ownership_pct"
-            label="Insider Ownership (%)"
-            color="#0891b2"
-            currency="%"
-          />
+          {ownershipData.some((d) => d.insider_ownership_pct != null) && (
+            <BarChart
+              data={ownershipData.filter((d) => d.insider_ownership_pct != null)}
+              valueKey="insider_ownership_pct"
+              label="Insider Ownership (%)"
+              color="#0891b2"
+              currency="%"
+            />
+          )}
+          {ownershipData.some((d) => d.ceo_total_compensation != null) && (
+            <BarChart
+              data={ownershipData.filter((d) => d.ceo_total_compensation != null)}
+              valueKey="ceo_total_compensation"
+              label="CEO Total Compensation ($K)"
+              color="#7c3aed"
+              currency="$K"
+            />
+          )}
         </div>
       )}
     </main>

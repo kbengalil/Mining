@@ -161,12 +161,35 @@ AIF_PROMPT = """Extract insider ownership data from this Annual Information Form
   "shares_outstanding": null,
   "exploration_spend": null,
   "quarterly_ga": null,
-  "insider_ownership_pct": null
+  "insider_ownership_pct": null,
+  "ceo_total_compensation": null
 }
 Rules:
 - insider_ownership_pct: total percentage of shares held or controlled by ALL directors and officers combined. Look for a table of insider holdings with a total row or stated percentage. Sum all individual director/officer rows if no total is given.
 - period: "AIF YYYY" where YYYY is the fiscal year the AIF covers (e.g. "AIF 2024")
 - period_end_date: YYYY-12-31 for the fiscal year end
+- ceo_total_compensation: always null — this document type does not disclose it.
+- All other fields must be null.
+Return ONLY the JSON, no other text."""
+
+
+MIC_PROMPT = """Extract CEO compensation data from this Management Information Circular (MIC) / proxy statement. Return ONLY a JSON object with these exact fields:
+{
+  "period": "AGM 2024",
+  "period_end_date": "2024-06-30",
+  "cash": null,
+  "cash_currency": null,
+  "financial_liabilities": null,
+  "shares_outstanding": null,
+  "exploration_spend": null,
+  "quarterly_ga": null,
+  "insider_ownership_pct": null,
+  "ceo_total_compensation": null
+}
+Rules:
+- ceo_total_compensation: the CEO's TOTAL annual compensation for the most recent fiscal year shown in the Summary Compensation Table — sum of base salary, bonus, share-based awards (RSUs/PSUs), option-based awards, pension value, and all other compensation. Use the stated Total if given, otherwise sum the components. Express as a plain number in THOUSANDS of the stated currency (e.g. C$450,000 → 450).
+- period: "AGM YYYY" where YYYY is the year of the annual meeting / most recent fiscal year covered
+- period_end_date: YYYY-06-30 unless a more specific date is evident
 - All other fields must be null.
 Return ONLY the JSON, no other text."""
 
@@ -354,23 +377,37 @@ def run_insider_ownership_job(job_id: str, slug: str, pdf_paths: list):
         job["label"] = clean_name
 
         url = supabase.storage.from_("documents").get_public_url(storage_path)
+        is_mic = bool(re.search(r"circular|proxy|\bmic\b", clean_name, re.IGNORECASE))
 
         period_hint, date_hint = None, None
         yr_m = re.search(r"(\d{4})", clean_name)
         if yr_m:
             yr = yr_m.group(1)
-            period_hint = f"AIF {yr}"
-            date_hint = f"{yr}-12-31"
+            if is_mic:
+                period_hint = f"AGM {yr}"
+                date_hint = f"{yr}-06-30"
+            else:
+                period_hint = f"AIF {yr}"
+                date_hint = f"{yr}-12-31"
+
+        prompt = MIC_PROMPT if is_mic else AIF_PROMPT
+        # AIFs and MICs are large (100+ pages); the relevant disclosure is usually near
+        # the end, well past a fixed truncation point, so locate it instead of guessing.
+        section_patterns = (
+            [r"summary compensation table", r"executive compensation"]
+            if is_mic
+            else [r"ownership of securities", r"directors and (?:executive officers|officers) as a group"]
+        )
 
         try:
             from agent import _extract_text
             pdf_bytes = fetch_pdf_bytes(url)
             text = _extract_text(pdf_bytes)
-            # AIFs are large (100+ pages); the ownership disclosure is usually near the
-            # end, well past a fixed truncation point, so locate it instead of guessing.
-            section_match = re.search(r"ownership of securities", text, re.IGNORECASE)
-            if not section_match:
-                section_match = re.search(r"directors and (?:executive officers|officers) as a group", text, re.IGNORECASE)
+            section_match = None
+            for pattern in section_patterns:
+                section_match = re.search(pattern, text, re.IGNORECASE)
+                if section_match:
+                    break
             if section_match:
                 start = max(0, section_match.start() - 1000)
                 excerpt = text[start:start + 10000]
@@ -381,7 +418,7 @@ def run_insider_ownership_job(job_id: str, slug: str, pdf_paths: list):
                 f"{GEMINI_URL}?key={key}",
                 headers={"Content-Type": "application/json"},
                 json={
-                    "contents": [{"role": "user", "parts": [{"text": f"{AIF_PROMPT}{hint_note}\n\n{excerpt}"}]}],
+                    "contents": [{"role": "user", "parts": [{"text": f"{prompt}{hint_note}\n\n{excerpt}"}]}],
                     "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
                 },
                 timeout=120,

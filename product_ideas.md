@@ -274,6 +274,7 @@ Roadmap stages:
 4. Watchlist + change detection — ALL 5 models
 5. SEDI + SEDAR+ external data feeds — Opus, Fable
 6. Second-model verification pass — Fable
+7. CEO comepesantion over time
 
 **Tier 2 — Strong follow-ons**
 7. Stage-tailored report templates — Opus, Fable
@@ -284,7 +285,7 @@ Roadmap stages:
 12. Technical report diffing — ChatGPT
 13. Red flags first (UX) — Gemini
 14. Permit & regulatory timeline tracker — Gemini
-15. Cost inflation / sensitivity sliders — Rick Rule session (2026-07-08)
+15. Cost inflation + discount rate / sensitivity sliders — Rick Rule session (2026-07-08)
 16. Compliance / disclaimer architecture — Fable
 
 **Tier 3 — Later**
