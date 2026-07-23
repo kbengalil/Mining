@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 const API = "http://127.0.0.1:8000";
 
@@ -52,6 +52,7 @@ export default function CompanyPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [elapsed, setElapsed] = useState(0);
+  const [activeReportTab, setActiveReportTab] = useState(0);
   const [finalTime, setFinalTime] = useState(null);
   const pollRef = useRef(null);
   const timerRef = useRef(null);
@@ -302,26 +303,18 @@ export default function CompanyPage() {
 
   return (
     <>
-      {/* Charts / Time Series / Insider Ownership — sits in the right gutter on wide screens */}
+      {/* Valuation vs Peers — sits in the right gutter on wide screens */}
       <div className="hidden xl:flex flex-col gap-2 fixed right-8 top-8 w-40">
-        <Link
-          href={`/companies/${encodeURIComponent(companyName)}/charts`}
-          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-center"
+        <button
+          onClick={() => setActiveReportTab(REPORT_TABS.findIndex((t) => t.label === "Valuation vs Peers"))}
+          className={`text-sm px-4 py-2 rounded-lg border transition-colors text-center ${
+            activeReportTab === REPORT_TABS.findIndex((t) => t.label === "Valuation vs Peers")
+              ? "bg-blue-600 text-white border-black"
+              : "border-black text-gray-600 hover:bg-gray-50"
+          }`}
         >
-          📊 Charts
-        </Link>
-        <Link
-          href={`/companies/${encodeURIComponent(companyName)}/timeline`}
-          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-center"
-        >
-          📈 Time Series
-        </Link>
-        <Link
-          href={`/companies/${encodeURIComponent(companyName)}/insider-ownership`}
-          className="text-sm px-4 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-center"
-        >
-          🏛 Insider Ownership
-        </Link>
+          Valuation vs Peers
+        </button>
       </div>
       {/* Home + Delete + Documents list — sits in the left gutter on wide screens */}
       <div className="hidden xl:block fixed left-8 top-8 w-64">
@@ -337,7 +330,7 @@ export default function CompanyPage() {
                   .then((r) => { if (r.ok) window.location.href = "/"; else alert("Delete failed"); })
                   .catch(() => alert("Delete failed"));
               }}
-              className="text-sm px-2 py-1 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+              className="text-sm px-2 py-1 border border-black rounded-lg text-red-500 hover:bg-red-50 transition-colors"
             >
               🗑
             </button>
@@ -391,7 +384,7 @@ export default function CompanyPage() {
                 setStatus("error");
                 setError("Analysis stopped.");
               }}
-              className="text-sm px-4 py-2 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+              className="text-sm px-4 py-2 border border-black rounded-lg text-red-500 hover:bg-red-50 transition-colors"
             >
               ⏹ Stop
             </button>
@@ -536,7 +529,7 @@ export default function CompanyPage() {
           {status === "done" && finalTime !== null && (
             <p className="text-xs text-gray-400 mb-4">Generated in {formatTime(finalTime)}</p>
           )}
-          <OverviewRenderer markdown={overview} pdfUrls={pdfUrls} />
+          <OverviewRenderer markdown={overview} pdfUrls={pdfUrls} companyName={companyName} activeTab={activeReportTab} setActiveTab={setActiveReportTab} />
         </>
       )}
       </main>
@@ -571,8 +564,8 @@ function makeParseInline(pdfUrls) {
 }
 
 const REPORT_TABS = [
-  { label: "Company Snapshot", sections: ["Company Snapshot", "Strategic Outlook"] },
-  { label: "The Team", sections: ["The Team"] },
+  { label: "Overview & Strategy", sections: ["Company Snapshot", "Strategic Outlook"] },
+  { label: "The people behind", sections: ["The Team"] },
   { label: "Financials", sections: ["Financials"] },
   { label: "Recent Developments", sections: ["Recent Developments"] },
   { label: "Red Flags", sections: ["Red Flags"] },
@@ -580,30 +573,67 @@ const REPORT_TABS = [
   { label: "Valuation vs Peers", sections: ["Valuation vs Peers"] },
 ];
 
-function OverviewRenderer({ markdown, pdfUrls }) {
+function OverviewRenderer({ markdown, pdfUrls, companyName, activeTab, setActiveTab }) {
   const parseInline = makeParseInline(pdfUrls);
   const allSections = markdown.split(/\n(?=## )/).filter(Boolean);
-  const [activeTab, setActiveTab] = useState(0);
 
   const sectionTitle = (section) => section.trim().split("\n")[0].replace(/^##\s*/, "").trim();
   const activeTitles = REPORT_TABS[activeTab].sections;
   const sections = allSections.filter((s) => activeTitles.includes(sectionTitle(s)));
 
+  const [openSourcePages, setOpenSourcePages] = useState({});
+  const fsUrl = Object.entries(pdfUrls || {}).find(([k]) => /(^|[-_])fs([-_]|$)/i.test(k))?.[1];
+
   return (
     <div>
       <div className="flex flex-wrap gap-2 mb-6">
         {REPORT_TABS.map((tab, i) => (
-          <button
-            key={tab.label}
-            onClick={() => setActiveTab(i)}
-            className={`text-sm px-4 py-2 rounded-lg border transition-colors ${
-              i === activeTab
-                ? "bg-blue-600 text-white border-blue-600"
-                : "border-gray-300 text-gray-600 hover:bg-gray-50"
-            }`}
-          >
-            {tab.label}
-          </button>
+          tab.label === "Valuation vs Peers" ? null :
+          <Fragment key={tab.label}>
+            <button
+              onClick={() => setActiveTab(i)}
+              className={`text-sm px-4 py-2 rounded-lg border transition-colors ${
+                i === activeTab
+                  ? "bg-blue-600 text-white border-black"
+                  : "border-black text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {tab.label}
+            </button>
+            {tab.label === "The people behind" && (
+              <Link
+                href={`/companies/${encodeURIComponent(companyName)}/insider-ownership`}
+                className="text-sm px-4 py-2 rounded-lg border border-black text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Insiders Ownership
+              </Link>
+            )}
+            {tab.label === "Key Project Metrics" && (
+              <div className="relative group">
+                <button
+                  className="text-sm px-4 py-2 rounded-lg border border-black text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  Dashboard
+                </button>
+                <div className="hidden group-hover:block absolute left-0 pt-1 w-40 z-10">
+                  <div className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                    <Link
+                      href={`/companies/${encodeURIComponent(companyName)}/charts`}
+                      className="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      📊 Charts
+                    </Link>
+                    <Link
+                      href={`/companies/${encodeURIComponent(companyName)}/timeline`}
+                      className="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      📈 Time Series
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Fragment>
         ))}
       </div>
       <div className="space-y-6">
@@ -616,55 +646,122 @@ function OverviewRenderer({ markdown, pdfUrls }) {
         const isSep = (l) => /^\|[-: |]+\|/.test(l.trim());
         const isTableRow = (l) => l.trim().startsWith("|");
 
-        const tableRows = contentLines.filter((l) => isTableRow(l) && !isSep(l));
-        const hasTable = tableRows.length > 0;
+        const isBlockTitle = (l) => /^\*\*([^*]+)\*\*$/.exec(l.trim());
 
         const parseRow = (l) =>
           l.trim().split("|").filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map((c) => c.trim());
 
-        const bullets = contentLines.filter((l) => l.trim().startsWith("-")).map((l) => l.replace(/^-\s*/, "").trim());
-        const prose = contentLines.filter((l) => l.trim() && !isTableRow(l) && !isSep(l) && !l.trim().startsWith("-")).map((l) => l.trim());
+        // A section can contain multiple sub-tables (e.g. Financials: Balance Sheet,
+        // Cash Flow & Capital, Project Economics, Share Structure) each preceded by a
+        // standalone **Bold Title** line — split into blocks so each renders separately
+        // instead of merging into one table with orphaned titles.
+        const blocks = [];
+        let current = { title: null, lines: [] };
+        for (const line of contentLines) {
+          const m = isBlockTitle(line);
+          if (m) {
+            if (current.title || current.lines.length > 0) blocks.push(current);
+            current = { title: m[1].trim(), lines: [] };
+          } else {
+            current.lines.push(line);
+          }
+        }
+        blocks.push(current);
+        if (blocks.length > 1 && !blocks[0].title) blocks[0].title = "Balance Sheet";
 
         return (
           <div key={i} className={`border-l-2 pl-4 ${isRedFlags ? "border-red-300" : "border-gray-200"}`}>
             <h2 className={`font-semibold mb-2 ${isRedFlags ? "text-red-700" : "text-gray-900"}`}>
               {title}
             </h2>
-            {prose.map((line, j) => (
-              <p key={j} className="text-sm text-gray-600 mb-1">{parseInline(line)}</p>
-            ))}
-            {hasTable && (
-              <div className="overflow-x-auto mt-2 mb-2">
-                <table className="text-sm w-full border-collapse">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      {parseRow(tableRows[0]).map((cell, j) => (
-                        <th key={j} className="text-left py-1 pr-4 font-semibold text-gray-700">{parseInline(cell)}</th>
+            {blocks.map((block, bi) => {
+              const tableRows = block.lines.filter((l) => isTableRow(l) && !isSep(l));
+              const hasTable = tableRows.length > 0;
+              const bullets = block.lines.filter((l) => l.trim().startsWith("-")).map((l) => l.replace(/^-\s*/, "").trim());
+              const prose = block.lines.filter((l) => l.trim() && !isTableRow(l) && !isSep(l) && !l.trim().startsWith("-")).map((l) => l.trim());
+
+              const pageCounts = {};
+              block.lines.join(" ").replace(/p\.(\d+)/g, (_, p) => { pageCounts[p] = (pageCounts[p] || 0) + 1; return ""; });
+              const mostCommonPage = Object.entries(pageCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+              const sourceKey = `${i}-${bi}`;
+              const sourceOpen = openSourcePages[sourceKey];
+
+              return (
+                <div key={bi} className={bi > 0 ? "mt-8" : ""}>
+                  {block.title && (
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="text-xs font-semibold text-red-600 uppercase tracking-wide">{block.title}</h3>
+                      {fsUrl && mostCommonPage && (
+                        <button
+                          onClick={() => setOpenSourcePages((s) => ({ ...s, [sourceKey]: !s[sourceKey] }))}
+                          className="text-xs text-blue-600 hover:underline"
+                        >
+                          {sourceOpen ? "Hide source page" : "📄 View source page"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {sourceOpen && fsUrl && mostCommonPage && (
+                    <div
+                      className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-6"
+                      onClick={() => setOpenSourcePages((s) => ({ ...s, [sourceKey]: false }))}
+                    >
+                      <div
+                        className="bg-white rounded-lg shadow-2xl w-full h-full max-w-6xl relative"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => setOpenSourcePages((s) => ({ ...s, [sourceKey]: false }))}
+                          className="absolute -top-4 -right-4 bg-white border border-black rounded-full w-9 h-9 flex items-center justify-center text-gray-700 hover:bg-gray-100 shadow-lg text-lg"
+                        >
+                          ✕
+                        </button>
+                        <embed
+                          src={`${fsUrl}#page=${mostCommonPage}`}
+                          type="application/pdf"
+                          className="w-full h-full rounded-lg"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {prose.map((line, j) => (
+                    <p key={j} className="text-sm text-gray-600 mb-1">{parseInline(line)}</p>
+                  ))}
+                  {hasTable && (
+                    <div className="overflow-x-auto mt-2 mb-2">
+                      <table className="text-sm w-full border-collapse">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            {parseRow(tableRows[0]).map((cell, j) => (
+                              <th key={j} className="text-left py-1 pr-4 font-semibold text-gray-700">{parseInline(cell)}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tableRows.slice(1).map((row, j) => (
+                            <tr key={j} className="border-b border-gray-100">
+                              {parseRow(row).map((cell, k) => (
+                                <td key={k} className="py-1 pr-4 text-gray-600 align-top">{parseInline(cell)}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {bullets.length > 0 && (
+                    <ul className="space-y-1">
+                      {bullets.map((b, j) => (
+                        <li key={j} className="flex gap-2 text-sm">
+                          <span className={`flex-shrink-0 ${isRedFlags ? "text-red-400" : "text-gray-400"}`}>•</span>
+                          <span className={isRedFlags ? "text-red-800" : "text-gray-700"}>{parseInline(b)}</span>
+                        </li>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tableRows.slice(1).map((row, j) => (
-                      <tr key={j} className="border-b border-gray-100">
-                        {parseRow(row).map((cell, k) => (
-                          <td key={k} className="py-1 pr-4 text-gray-600 align-top">{parseInline(cell)}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {bullets.length > 0 && (
-              <ul className="space-y-1">
-                {bullets.map((b, j) => (
-                  <li key={j} className="flex gap-2 text-sm">
-                    <span className={`flex-shrink-0 ${isRedFlags ? "text-red-400" : "text-gray-400"}`}>•</span>
-                    <span className={isRedFlags ? "text-red-800" : "text-gray-700"}>{parseInline(b)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       })}
