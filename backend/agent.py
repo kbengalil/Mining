@@ -154,16 +154,16 @@ Start with a table titled **Cash Flow & Capital** with these rows:
 - **Cash runway at total burn (calc)** — Cash and cash equivalents only, divided by total annual cash burn, expressed in years.
 - LOM net free cash flow (if disclosed, from the technical report) — state pre-tax or post-tax and include currency
 
-After the Cash Flow & Capital table, add a second small table titled **Project Economics** with these rows (source: the most recent technical report or PFS/feasibility study ONLY — do NOT use NPV or IRR figures from investor presentations, corporate presentations, or company websites, as these are not NI 43-101 certified):
+After the Cash Flow & Capital table, add a second small table titled **Share Structure** with only these rows — do NOT include separate rows for shares outstanding, warrants outstanding, or options outstanding individually, as those are plain source-document copies the user can view directly; still read those figures from the source document to compute the calculated rows below:
+- RSUs / PSUs / DSUs outstanding (combine into one row) (calc)
+- **Fully diluted shares (calc)** — sum of shares outstanding + warrants outstanding + options outstanding + RSUs/PSUs/DSUs outstanding
+
+After the Share Structure table, add a third small table titled **Project Economics** with these rows (source: the most recent technical report or PFS/feasibility study ONLY — do NOT use NPV or IRR figures from investor presentations, corporate presentations, or company websites, as these are not NI 43-101 certified):
 - NPV — include ALL discount rate scenarios from the technical report (e.g. 3%, 5%, 7%), gold price assumed, and pre-tax or post-tax — do not omit any scenario
 - IRR — include gold price assumed and pre-tax or post-tax (include ALL scenarios disclosed)
 - Payback period
 - Initial capex
 - AISC (All-In Sustaining Cost) per oz (if disclosed)
-
-After the Project Economics table, add a third small table titled **Share Structure** with only these rows — do NOT include separate rows for shares outstanding, warrants outstanding, or options outstanding individually, as those are plain source-document copies the user can view directly; still read those figures from the source document to compute the calculated rows below:
-- RSUs / PSUs / DSUs outstanding (combine into one row) (calc)
-- **Fully diluted shares (calc)** — sum of shares outstanding + warrants outstanding + options outstanding + RSUs/PSUs/DSUs outstanding
 
 ## Strategic Outlook
 Summarize explicit management statements from any document on: future M&A appetite (e.g. "no further acquisitions planned"), annual exploration or capital spending targets ($X/year), production growth timeline and targets, dividend or buyback policy, and any other stated priorities. Quote figures directly where available. If not disclosed, write "Not disclosed."
