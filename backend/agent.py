@@ -143,33 +143,27 @@ From the Management Information Circular (proxy document):
 Also check presentations and fact sheets for: (1) major strategic shareholders (individuals or institutions owning >5%): list each name, approximate % ownership, and any notable detail; and (2) the overall shareholder mix breakdown by category (e.g. Retail, Institutional, Management) if disclosed — include this even if no single named shareholder owns >5%.
 
 ## Financials
-Use the most recent financial report available. Present all figures as a two-column markdown table. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Express all figures in millions (e.g. C$126.9M, not C$126,892 or C$126,892,000) — financial statements often express figures in thousands, always convert to millions before displaying. Mark any calculated (not directly sourced) figure with "(calc)" in the metric name. If a figure is genuinely not disclosed, write "Not disclosed".
+Use the most recent financial report available. Present all figures as two-column markdown tables. Left header: **Metric**. Right header: **Value (C$)** for Canadian-dollar financials or **Value (US$)** for USD — match the currency of the source document exactly, do not convert. Always include the currency code and unit with every monetary figure in the Value column (e.g. "C$44.8M", not "44.8 million"). Express all figures in millions (e.g. C$126.9M, not C$126,892 or C$126,892,000) — financial statements often express figures in thousands, always convert to millions before displaying. Mark any calculated (not directly sourced) figure with "(calc)" in the metric name. If a figure is genuinely not disclosed, write "Not disclosed".
 
-IMPORTANT: Extract and present every line item in EXACTLY the same order and grouping as they appear in the balance sheet. Do not reorder, skip, or combine lines. The user will compare this table side by side with the source document, so the structure must match. Use bold group labels exactly as they appear in the document (e.g. **Assets — Current**, **Assets — Non-current**, **Liabilities — Current**, **Liabilities — Non-current**, **Shareholders' Equity**). Include every subtotal and total line (Total current assets, Total non-current assets, Total assets, Total current liabilities, Total non-current liabilities, Total liabilities, Total shareholders' equity, Total liabilities and shareholders' equity).
+Include the report date in the section header (e.g. "As at March 31, 2026"). Do NOT include a Balance Sheet table or transcribe any balance sheet line items (assets, liabilities, equity) — the user reviews the full balance sheet directly via the source document, so a plain re-copy of it is redundant.
 
-Include the report date in the section header (e.g. "As at March 31, 2026").
-
-After the balance sheet table, add a second small table titled **Cash Flow & Capital** with these rows:
+Start with a table titled **Cash Flow & Capital** with these rows:
 - Annual cash burn — operating activities only (from Statement of Cash Flows: "Cash used in operating activities")
 - Annual cash burn — investing activities only: use the company's stated annual exploration or capital budget if disclosed — check the MD&A narrative first, then the Financial Statements notes (e.g. commitments and contingencies note); otherwise annualize the most recent quarter from the Statement of Cash Flows
 - **Total cash burn (calc)** — sum of operating + investing cash used
 - **Cash runway at total burn (calc)** — Cash and cash equivalents only, divided by total annual cash burn, expressed in years.
-- Annual exploration / capital budget (if disclosed in MD&A or FS notes)
-- LOM net free cash flow (if disclosed) — state pre-tax or post-tax and include currency
+- LOM net free cash flow (if disclosed, from the technical report) — state pre-tax or post-tax and include currency
 
-After the Cash Flow & Capital table, add a third small table titled **Project Economics** with these rows (source: the most recent technical report or PFS/feasibility study ONLY — do NOT use NPV or IRR figures from investor presentations, corporate presentations, or company websites, as these are not NI 43-101 certified):
+After the Cash Flow & Capital table, add a second small table titled **Project Economics** with these rows (source: the most recent technical report or PFS/feasibility study ONLY — do NOT use NPV or IRR figures from investor presentations, corporate presentations, or company websites, as these are not NI 43-101 certified):
 - NPV — include ALL discount rate scenarios from the technical report (e.g. 3%, 5%, 7%), gold price assumed, and pre-tax or post-tax — do not omit any scenario
 - IRR — include gold price assumed and pre-tax or post-tax (include ALL scenarios disclosed)
 - Payback period
 - Initial capex
 - AISC (All-In Sustaining Cost) per oz (if disclosed)
 
-After the Project Economics table, add a fourth small table titled **Share Structure** with these rows:
-- Shares outstanding (include the date)
-- Warrants outstanding
-- Options outstanding
-- RSUs / PSUs / DSUs outstanding (combine into one row)
-- **Fully diluted shares (calc)** — sum of all above
+After the Project Economics table, add a third small table titled **Share Structure** with only these rows — do NOT include separate rows for shares outstanding, warrants outstanding, or options outstanding individually, as those are plain source-document copies the user can view directly; still read those figures from the source document to compute the calculated rows below:
+- RSUs / PSUs / DSUs outstanding (combine into one row) (calc)
+- **Fully diluted shares (calc)** — sum of shares outstanding + warrants outstanding + options outstanding + RSUs/PSUs/DSUs outstanding
 
 ## Strategic Outlook
 Summarize explicit management statements from any document on: future M&A appetite (e.g. "no further acquisitions planned"), annual exploration or capital spending targets ($X/year), production growth timeline and targets, dividend or buyback policy, and any other stated priorities. Quote figures directly where available. If not disclosed, write "Not disclosed."

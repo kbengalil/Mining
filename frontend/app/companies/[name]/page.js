@@ -579,9 +579,9 @@ function OverviewRenderer({ markdown, pdfUrls, companyName, activeTab, setActive
 
   const sectionTitle = (section) => section.trim().split("\n")[0].replace(/^##\s*/, "").trim();
   const activeTitles = REPORT_TABS[activeTab].sections;
-  const sections = allSections.filter((s) => activeTitles.includes(sectionTitle(s)));
+  const sections = allSections.filter((s) => activeTitles.some((t) => sectionTitle(s).startsWith(t)));
 
-  const [openSourcePages, setOpenSourcePages] = useState({});
+  const [fsSourceOpen, setFsSourceOpen] = useState(false);
   const fsUrl = Object.entries(pdfUrls || {}).find(([k]) => /(^|[-_])fs([-_]|$)/i.test(k))?.[1];
 
   return (
@@ -646,7 +646,14 @@ function OverviewRenderer({ markdown, pdfUrls, companyName, activeTab, setActive
         const isSep = (l) => /^\|[-: |]+\|/.test(l.trim());
         const isTableRow = (l) => l.trim().startsWith("|");
 
-        const isBlockTitle = (l) => /^\*\*([^*]+)\*\*$/.exec(l.trim());
+        const isBlockTitle = (l) => {
+          const t = l.trim();
+          const bold = /^\*\*([^*]+)\*\*$/.exec(t);
+          if (bold) return bold;
+          const heading = /^#{2,6}\s+(.+)$/.exec(t);
+          if (heading) return [t, heading[1].replace(/\*\*/g, "").trim()];
+          return null;
+        };
 
         const parseRow = (l) =>
           l.trim().split("|").filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map((c) => c.trim());
@@ -660,69 +667,58 @@ function OverviewRenderer({ markdown, pdfUrls, companyName, activeTab, setActive
         for (const line of contentLines) {
           const m = isBlockTitle(line);
           if (m) {
-            if (current.title || current.lines.length > 0) blocks.push(current);
+            if (current.lines.length > 0) blocks.push(current);
             current = { title: m[1].trim(), lines: [] };
           } else {
             current.lines.push(line);
           }
         }
         blocks.push(current);
-        if (blocks.length > 1 && !blocks[0].title) blocks[0].title = "Balance Sheet";
 
         return (
           <div key={i} className={`border-l-2 pl-4 ${isRedFlags ? "border-red-300" : "border-gray-200"}`}>
             <h2 className={`font-semibold mb-2 ${isRedFlags ? "text-red-700" : "text-gray-900"}`}>
               {title}
             </h2>
+            {title.startsWith("Financials") && fsUrl && (
+              <>
+                <button
+                  onClick={() => setFsSourceOpen((v) => !v)}
+                  className="text-xs text-blue-600 hover:underline mb-3 inline-block"
+                >
+                  📄 View source page
+                </button>
+                {fsSourceOpen && (
+                  <div
+                    className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-6"
+                    onClick={() => setFsSourceOpen(false)}
+                  >
+                    <div
+                      className="bg-white rounded-lg shadow-2xl w-full h-full max-w-6xl relative"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => setFsSourceOpen(false)}
+                        className="absolute -top-4 -right-4 bg-white border border-black rounded-full w-9 h-9 flex items-center justify-center text-gray-700 hover:bg-gray-100 shadow-lg text-lg"
+                      >
+                        ✕
+                      </button>
+                      <embed src={fsUrl} type="application/pdf" className="w-full h-full rounded-lg" />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
             {blocks.map((block, bi) => {
               const tableRows = block.lines.filter((l) => isTableRow(l) && !isSep(l));
               const hasTable = tableRows.length > 0;
               const bullets = block.lines.filter((l) => l.trim().startsWith("-")).map((l) => l.replace(/^-\s*/, "").trim());
               const prose = block.lines.filter((l) => l.trim() && !isTableRow(l) && !isSep(l) && !l.trim().startsWith("-")).map((l) => l.trim());
 
-              const pageCounts = {};
-              block.lines.join(" ").replace(/p\.(\d+)/g, (_, p) => { pageCounts[p] = (pageCounts[p] || 0) + 1; return ""; });
-              const mostCommonPage = Object.entries(pageCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
-              const sourceKey = `${i}-${bi}`;
-              const sourceOpen = openSourcePages[sourceKey];
-
               return (
                 <div key={bi} className={bi > 0 ? "mt-8" : ""}>
                   {block.title && (
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-xs font-semibold text-red-600 uppercase tracking-wide">{block.title}</h3>
-                      {fsUrl && mostCommonPage && (
-                        <button
-                          onClick={() => setOpenSourcePages((s) => ({ ...s, [sourceKey]: !s[sourceKey] }))}
-                          className="text-xs text-blue-600 hover:underline"
-                        >
-                          {sourceOpen ? "Hide source page" : "📄 View source page"}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {sourceOpen && fsUrl && mostCommonPage && (
-                    <div
-                      className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-6"
-                      onClick={() => setOpenSourcePages((s) => ({ ...s, [sourceKey]: false }))}
-                    >
-                      <div
-                        className="bg-white rounded-lg shadow-2xl w-full h-full max-w-6xl relative"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          onClick={() => setOpenSourcePages((s) => ({ ...s, [sourceKey]: false }))}
-                          className="absolute -top-4 -right-4 bg-white border border-black rounded-full w-9 h-9 flex items-center justify-center text-gray-700 hover:bg-gray-100 shadow-lg text-lg"
-                        >
-                          ✕
-                        </button>
-                        <embed
-                          src={`${fsUrl}#page=${mostCommonPage}`}
-                          type="application/pdf"
-                          className="w-full h-full rounded-lg"
-                        />
-                      </div>
-                    </div>
+                    <h3 className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-2">{block.title}</h3>
                   )}
                   {prose.map((line, j) => (
                     <p key={j} className="text-sm text-gray-600 mb-1">{parseInline(line)}</p>
