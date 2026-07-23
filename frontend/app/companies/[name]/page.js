@@ -303,18 +303,53 @@ export default function CompanyPage() {
 
   return (
     <>
-      {/* Valuation vs Peers — sits in the right gutter on wide screens */}
-      <div className="hidden xl:flex flex-col gap-2 fixed right-8 top-8 w-40">
-        <button
-          onClick={() => setActiveReportTab(REPORT_TABS.findIndex((t) => t.label === "Valuation vs Peers"))}
-          className={`text-sm px-4 py-2 rounded-lg border transition-colors text-center ${
-            activeReportTab === REPORT_TABS.findIndex((t) => t.label === "Valuation vs Peers")
-              ? "bg-blue-600 text-white border-black"
-              : "border-black text-gray-600 hover:bg-gray-50"
-          }`}
-        >
-          Valuation vs Peers
-        </button>
+      {/* Report tabs — sits in the right gutter on wide screens */}
+      <div className="hidden xl:flex flex-col gap-2 fixed right-8 top-8 w-44">
+        {REPORT_TABS.map((tab, i) => (
+          <Fragment key={tab.label}>
+            <button
+              onClick={() => setActiveReportTab(i)}
+              className={`text-sm px-4 py-2 rounded-lg border transition-colors text-center ${
+                i === activeReportTab
+                  ? "bg-blue-600 text-white border-black"
+                  : "border-black text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {tab.label}
+            </button>
+            {tab.label === "The people behind" && (
+              <Link
+                href={`/companies/${encodeURIComponent(companyName)}/insider-ownership`}
+                className="text-sm px-4 py-2 rounded-lg border border-black text-gray-600 hover:bg-gray-50 transition-colors text-center"
+              >
+                Insiders Ownership
+              </Link>
+            )}
+            {tab.label === "Financials" && (
+              <div className="relative group">
+                <button className="w-full text-sm px-4 py-2 rounded-lg border border-black text-gray-600 hover:bg-gray-50 transition-colors text-center">
+                  Dashboard
+                </button>
+                <div className="hidden group-hover:block absolute right-0 pt-1 w-40 z-10">
+                  <div className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                    <Link
+                      href={`/companies/${encodeURIComponent(companyName)}/charts`}
+                      className="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      Corp. presentation charts
+                    </Link>
+                    <Link
+                      href={`/companies/${encodeURIComponent(companyName)}/timeline`}
+                      className="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      Financials over time
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Fragment>
+        ))}
       </div>
       {/* Home + Delete + Documents list — sits in the left gutter on wide screens */}
       <div className="hidden xl:block fixed left-8 top-8 w-64">
@@ -567,9 +602,9 @@ const REPORT_TABS = [
   { label: "Overview & Strategy", sections: ["Company Snapshot", "Strategic Outlook"] },
   { label: "The people behind", sections: ["The Team"] },
   { label: "Financials", sections: ["Financials"] },
-  { label: "Recent Developments", sections: ["Recent Developments"] },
   { label: "Red Flags", sections: ["Red Flags"] },
   { label: "Key Project Metrics", sections: ["Key Project Metrics"] },
+  { label: "News", sections: ["Recent Developments"] },
   { label: "Valuation vs Peers", sections: ["Valuation vs Peers"] },
 ];
 
@@ -586,56 +621,6 @@ function OverviewRenderer({ markdown, pdfUrls, companyName, activeTab, setActive
 
   return (
     <div>
-      <div className="flex flex-wrap gap-2 mb-6">
-        {REPORT_TABS.map((tab, i) => (
-          tab.label === "Valuation vs Peers" ? null :
-          <Fragment key={tab.label}>
-            <button
-              onClick={() => setActiveTab(i)}
-              className={`text-sm px-4 py-2 rounded-lg border transition-colors ${
-                i === activeTab
-                  ? "bg-blue-600 text-white border-black"
-                  : "border-black text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              {tab.label}
-            </button>
-            {tab.label === "The people behind" && (
-              <Link
-                href={`/companies/${encodeURIComponent(companyName)}/insider-ownership`}
-                className="text-sm px-4 py-2 rounded-lg border border-black text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                Insiders Ownership
-              </Link>
-            )}
-            {tab.label === "Key Project Metrics" && (
-              <div className="relative group">
-                <button
-                  className="text-sm px-4 py-2 rounded-lg border border-black text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  Dashboard
-                </button>
-                <div className="hidden group-hover:block absolute left-0 pt-1 w-40 z-10">
-                  <div className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
-                    <Link
-                      href={`/companies/${encodeURIComponent(companyName)}/charts`}
-                      className="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                      📊 Charts
-                    </Link>
-                    <Link
-                      href={`/companies/${encodeURIComponent(companyName)}/timeline`}
-                      className="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                      📈 Time Series
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Fragment>
-        ))}
-      </div>
       <div className="space-y-6">
       {sections.map((section, i) => {
         const lines = section.trim().split("\n");
@@ -710,6 +695,7 @@ function OverviewRenderer({ markdown, pdfUrls, companyName, activeTab, setActive
               </>
             )}
             {blocks.map((block, bi) => {
+              if (block.title === "Insider Ownership & Compensation") return null;
               const tableRows = block.lines.filter((l) => isTableRow(l) && !isSep(l));
               const hasTable = tableRows.length > 0;
               const bullets = block.lines.filter((l) => l.trim().startsWith("-")).map((l) => l.replace(/^-\s*/, "").trim());

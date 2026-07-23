@@ -49,6 +49,118 @@ function BarChart({ data, valueKey, label, color, currency }) {
   );
 }
 
+function makeParseInline(pdfUrls) {
+  return function parseInline(text) {
+    return text.split(/(\*\*[^*]+\*\*|\[src:[^\]]+\])/).map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**"))
+        return <strong key={i}>{part.slice(2, -2)}</strong>;
+      const m = part.match(/^\[src:(.+),\s*p\.(\d+)\]$/);
+      if (m) {
+        const label = m[1].trim();
+        const page = m[2];
+        const url = pdfUrls?.[label]
+          || Object.entries(pdfUrls || {}).find(([k]) => k.toLowerCase() === label.toLowerCase())?.[1];
+        return url ? (
+          <a key={i} href={`${url}#page=${page}`} target="_blank" rel="noopener noreferrer"
+             className="inline-flex text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded px-1 ml-0.5 no-underline"
+             style={{ verticalAlign: "super", lineHeight: 1 }}>
+            p.{page}
+          </a>
+        ) : (
+          <sup key={i} className="text-xs text-gray-400 ml-0.5">[p.{page}]</sup>
+        );
+      }
+      return part;
+    });
+  };
+}
+
+function extractInsiderCompBlock(markdown) {
+  const sections = markdown.split(/\n(?=## )/).filter(Boolean);
+  const teamSection = sections.find((s) =>
+    s.trim().split("\n")[0].replace(/^##\s*/, "").trim().startsWith("The Team")
+  );
+  if (!teamSection) return null;
+
+  const isBlockTitle = (l) => {
+    const t = l.trim();
+    const bold = /^\*\*([^*]+)\*\*$/.exec(t);
+    if (bold) return bold;
+    const heading = /^#{2,6}\s+(.+)$/.exec(t);
+    if (heading) return [t, heading[1].replace(/\*\*/g, "").trim()];
+    return null;
+  };
+
+  const contentLines = teamSection.trim().split("\n").slice(1);
+  const blocks = [];
+  let current = { title: null, lines: [] };
+  for (const line of contentLines) {
+    const m = isBlockTitle(line);
+    if (m) {
+      if (current.lines.length > 0) blocks.push(current);
+      current = { title: m[1].trim(), lines: [] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  blocks.push(current);
+  return blocks.find((b) => b.title === "Insider Ownership & Compensation") || null;
+}
+
+function InsiderCompBlock({ block, pdfUrls }) {
+  const parseInline = makeParseInline(pdfUrls);
+  const isSep = (l) => /^\|[-: |]+\|/.test(l.trim());
+  const isTableRow = (l) => l.trim().startsWith("|");
+  const isBullet = (l) => /^[-*]\s*/.test(l.trim());
+  const parseRow = (l) =>
+    l.trim().split("|").filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map((c) => c.trim());
+
+  const tableRows = block.lines.filter((l) => isTableRow(l) && !isSep(l));
+  const bullets = block.lines.filter((l) => isBullet(l)).map((l) => l.replace(/^[-*]\s*/, "").trim());
+  const prose = block.lines.filter((l) => l.trim() && !isTableRow(l) && !isSep(l) && !isBullet(l)).map((l) => l.trim());
+
+  return (
+    <div className="mb-8 border-l-2 border-gray-200 pl-4">
+      <h3 className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-2">Insider Ownership & Compensation</h3>
+      {prose.map((line, j) => (
+        <p key={j} className="text-sm text-gray-600 mb-1">{parseInline(line)}</p>
+      ))}
+      {bullets.length > 0 && (
+        <ul className="space-y-1 mb-2">
+          {bullets.map((b, j) => (
+            <li key={j} className="flex gap-2 text-sm">
+              <span className="flex-shrink-0 text-gray-400">•</span>
+              <span className="text-gray-700">{parseInline(b)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {tableRows.length > 0 && (
+        <div className="overflow-x-auto mt-2">
+          <table className="text-sm w-full border-collapse">
+            <thead>
+              <tr className="border-b border-gray-200">
+                {parseRow(tableRows[0]).map((cell, j) => (
+                  <th key={j} className="text-left py-1 pr-4 font-semibold text-gray-700">{parseInline(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.slice(1).map((row, j) => (
+                <tr key={j} className="border-b border-gray-100">
+                  {parseRow(row).map((cell, k) => (
+                    <td key={k} className="py-1 pr-4 text-gray-600 align-top">{parseInline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InsiderOwnershipPage() {
   const { name } = useParams();
   const companyName = decodeURIComponent(name);
@@ -59,6 +171,8 @@ export default function InsiderOwnershipPage() {
   const [deleting, setDeleting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, label: "" });
   const [ownershipData, setOwnershipData] = useState(null);
+  const [insiderCompBlock, setInsiderCompBlock] = useState(null);
+  const [pdfUrls, setPdfUrls] = useState({});
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
   const pollRef = useRef(null);
@@ -88,6 +202,22 @@ export default function InsiderOwnershipPage() {
           setAnalyzing(true);
           pollRef.current = setInterval(() => pollJob(active.job_id), 1000);
         }
+      })
+      .catch(() => {});
+    // Pull the Insider Ownership & Compensation text from the main report
+    fetch(`${API}/companies/${encodeURIComponent(companyName)}/overview`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (!d) return;
+        if (d.source_urls) {
+          const map = {};
+          d.source_urls.forEach((url) => {
+            const label = decodeURIComponent(url.split("/").pop().replace(/\.pdf$/i, ""));
+            map[label] = url;
+          });
+          setPdfUrls(map);
+        }
+        setInsiderCompBlock(extractInsiderCompBlock(d.overview_markdown));
       })
       .catch(() => {});
   }, [companyName]);
@@ -225,6 +355,8 @@ export default function InsiderOwnershipPage() {
     <main className="max-w-2xl mx-auto p-8">
       <h1 className="text-2xl font-bold mb-1">{companyName}</h1>
       <p className="text-sm text-gray-500 mb-8">Insider Ownership & CEO Compensation — by Year</p>
+
+      {insiderCompBlock && <InsiderCompBlock block={insiderCompBlock} pdfUrls={pdfUrls} />}
 
       {/* Upload area — hidden once analysis results exist */}
       {!hasData && (
