@@ -219,9 +219,10 @@ Rules:
 
 
 timeline_jobs: dict[str, dict] = {}
+active_timeline_jobs_by_company: dict[str, str] = {}  # company_name -> job_id for running jobs
 
 
-def run_timeline_job(job_id: str, slug: str, pdf_paths: list):
+def run_timeline_job(job_id: str, slug: str, pdf_paths: list, company_name: str):
     import json as _json
     job = timeline_jobs[job_id]
     folder = f"{slug}/timeline"
@@ -230,6 +231,7 @@ def run_timeline_job(job_id: str, slug: str, pdf_paths: list):
 
     for i, storage_path in enumerate(pdf_paths):
         if job.get("status") == "cancelled":
+            active_timeline_jobs_by_company.pop(company_name, None)
             return
 
         clean_name = storage_path.split("/")[-1]
@@ -291,6 +293,7 @@ def run_timeline_job(job_id: str, slug: str, pdf_paths: list):
     )
     job["status"] = "done"
     job["data"] = results
+    active_timeline_jobs_by_company.pop(company_name, None)
 
 
 @app.post("/companies/{company_name}/timeline/analyze")
@@ -306,8 +309,17 @@ def analyze_timeline(company_name: str, background_tasks: BackgroundTasks):
 
     job_id = str(uuid.uuid4())
     timeline_jobs[job_id] = {"status": "running", "current": 0, "total": len(pdf_paths), "label": "Starting..."}
-    background_tasks.add_task(run_timeline_job, job_id, slug, pdf_paths)
+    active_timeline_jobs_by_company[company_name] = job_id
+    background_tasks.add_task(run_timeline_job, job_id, slug, pdf_paths, company_name)
     return {"job_id": job_id, "total": len(pdf_paths)}
+
+
+@app.get("/companies/{company_name}/timeline/active-job")
+def get_active_timeline_job(company_name: str):
+    job_id = active_timeline_jobs_by_company.get(company_name)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="No active job")
+    return {"job_id": job_id}
 
 
 @app.get("/companies/{company_name}/timeline/jobs/{job_id}")
@@ -359,9 +371,10 @@ def get_timeline_data(company_name: str):
 
 
 insider_ownership_jobs: dict[str, dict] = {}
+active_insider_ownership_jobs_by_company: dict[str, str] = {}  # company_name -> job_id for running jobs
 
 
-def run_insider_ownership_job(job_id: str, slug: str, pdf_paths: list):
+def run_insider_ownership_job(job_id: str, slug: str, pdf_paths: list, company_name: str):
     import json as _json
     job = insider_ownership_jobs[job_id]
     folder = f"{slug}/insider-ownership"
@@ -370,6 +383,7 @@ def run_insider_ownership_job(job_id: str, slug: str, pdf_paths: list):
 
     for i, storage_path in enumerate(pdf_paths):
         if job.get("status") == "cancelled":
+            active_insider_ownership_jobs_by_company.pop(company_name, None)
             return
 
         clean_name = storage_path.split("/")[-1]
@@ -446,6 +460,7 @@ def run_insider_ownership_job(job_id: str, slug: str, pdf_paths: list):
     )
     job["status"] = "done"
     job["data"] = results
+    active_insider_ownership_jobs_by_company.pop(company_name, None)
 
 
 @app.post("/companies/{company_name}/insider-ownership/upload")
@@ -482,8 +497,17 @@ def analyze_insider_ownership(company_name: str, background_tasks: BackgroundTas
 
     job_id = str(uuid.uuid4())
     insider_ownership_jobs[job_id] = {"status": "running", "current": 0, "total": len(pdf_paths), "label": "Starting..."}
-    background_tasks.add_task(run_insider_ownership_job, job_id, slug, pdf_paths)
+    active_insider_ownership_jobs_by_company[company_name] = job_id
+    background_tasks.add_task(run_insider_ownership_job, job_id, slug, pdf_paths, company_name)
     return {"job_id": job_id, "total": len(pdf_paths)}
+
+
+@app.get("/companies/{company_name}/insider-ownership/active-job")
+def get_active_insider_ownership_job(company_name: str):
+    job_id = active_insider_ownership_jobs_by_company.get(company_name)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="No active job")
+    return {"job_id": job_id}
 
 
 @app.get("/companies/{company_name}/insider-ownership/jobs/{job_id}")

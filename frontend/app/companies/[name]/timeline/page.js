@@ -125,7 +125,37 @@ export default function TimelinePage() {
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setUploadedFiles(d.files || []); })
       .catch(() => {});
+    // Reconnect to a job still running server-side (e.g. navigated away and back)
+    fetch(`${API}/companies/${encodeURIComponent(companyName)}/timeline/active-job`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((active) => {
+        if (active?.job_id) {
+          jobIdRef.current = active.job_id;
+          setAnalyzing(true);
+          pollRef.current = setInterval(() => pollJob(active.job_id), 1000);
+        }
+      })
+      .catch(() => {});
   }, [companyName]);
+
+  function pollJob(job_id) {
+    fetch(`${API}/companies/${encodeURIComponent(companyName)}/timeline/jobs/${job_id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((job) => {
+        if (!job) return;
+        setProgress({ current: job.current, total: job.total, label: job.label });
+        if (job.status === "done") {
+          clearInterval(pollRef.current);
+          setTimelineData(job.data);
+          setAnalyzing(false);
+        } else if (job.status === "cancelled" || job.status === "error") {
+          clearInterval(pollRef.current);
+          setAnalyzing(false);
+          if (job.error) setError(job.error);
+        }
+      })
+      .catch(() => {});
+  }
 
   async function handleFiles(files) {
     if (!files || files.length === 0) return;
@@ -161,26 +191,7 @@ export default function TimelinePage() {
       const { job_id, total } = await res.json();
       jobIdRef.current = job_id;
       setProgress({ current: 0, total, label: "Starting..." });
-
-      pollRef.current = setInterval(async () => {
-        try {
-          const r = await fetch(
-            `${API}/companies/${encodeURIComponent(companyName)}/timeline/jobs/${job_id}`
-          );
-          if (!r.ok) return;
-          const job = await r.json();
-          setProgress({ current: job.current, total: job.total, label: job.label });
-          if (job.status === "done") {
-            clearInterval(pollRef.current);
-            setTimelineData(job.data);
-            setAnalyzing(false);
-          } else if (job.status === "cancelled" || job.status === "error") {
-            clearInterval(pollRef.current);
-            setAnalyzing(false);
-            if (job.error) setError(job.error);
-          }
-        } catch {}
-      }, 1000);
+      pollRef.current = setInterval(() => pollJob(job_id), 1000);
     } catch (e) {
       setError(e.message);
       setAnalyzing(false);
